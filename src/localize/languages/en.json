@@ -4,7 +4,8 @@
   },
   "ui": {
     "rate_limited": "Rate limited — waiting for quota to reset",
-    "save_map_center": "Save as map center"
+    "save_map_center": "Save as map center",
+    "loading_radar_tiles": "Loading radar tiles"
   },
   "editor": {
     "section": {
@@ -68,7 +69,8 @@
       "cluster_markers": "Cluster Markers",
       "show_snow": "Show Snow",
       "show_color_bar": "Show Colour Bar",
-      "show_progress_bar": "Show Progress Bar"
+      "show_progress_bar": "Show Progress Bar",
+      "show_loading_spinner": "Show Loading Spinner"
     },
     "interaction": {
       "disable_scroll": "Disable Scroll (allow page swipe through map)",
