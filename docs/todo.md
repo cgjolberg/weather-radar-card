@@ -103,6 +103,21 @@ preserving pinch-to-zoom, so mobile users can scroll past the card.
   Touches: art only. No code, no test, no docs (beyond a CHANGELOG line
   noting "Custom HACS icon"). Worth landing for 3.5 stable.
 
+- **Flip README documentation-index links from `nws-alerts` back to `master` at 3.5 release.**
+  All `https://github.com/Makin-Things/weather-radar-card/blob/<branch>/...`
+  URLs in `README.md` currently point at `blob/nws-alerts/` because the
+  `docs/` files don't yet exist on master (master is still 3.4.0). When
+  3.5 stable is merged into master, run:
+
+  ```bash
+  sed -i '' 's|blob/nws-alerts/|blob/master/|g' README.md
+  ```
+
+  …and commit. Do this in the same PR / commit that promotes 3.5 to
+  master so that no in-flight HACS render of the nws-alerts beta
+  README ever loads broken links and so master's README never points
+  at a feature branch.
+
 ### Shipped
 
 - Clickable / draggable timeline ✅
