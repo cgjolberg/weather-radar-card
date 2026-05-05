@@ -329,8 +329,9 @@ export class WeatherRadarCardEditor extends LitElement implements LovelaceCardEd
             <ha-switch .checked=${config.show_progress_bar !== false} .configValue=${'show_progress_bar'} @change=${this._valueChangedSwitch}></ha-switch>
             <span>${localize('editor.display.show_progress_bar')}</span>
           </label>
-          <label>${localize('editor.display.show_loading_spinner')}
+          <label>
             <ha-switch .checked=${config.show_loading_spinner !== false} .configValue=${'show_loading_spinner'} @change=${this._valueChangedSwitch}></ha-switch>
+            <span>${localize('editor.display.show_loading_spinner')}</span>
           </label>
         </div>
 
