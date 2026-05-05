@@ -20,7 +20,7 @@ This card displays animated weather radar loops within Home Assistant. It suppor
 - **Sections-grid support** — `getGridOptions()` plus a flex layout that fills any cell, with a responsive bottom row that hides the date prefix on narrow cards.
 - **`smooth_overlap`** crossfade knob (0–1) — tune the brightness-dip vs cushion trade-off for your basemap.
 - **Loading spinner** + **"Now" marker** + **dark-map scale fix** — three contributions from [@genericJE](https://github.com/genericJE).
-- **HACS picker preview** — the card now shows a live preview tile in HA's card picker.
+- **Card-picker preview** — a static preview image now shows in HA's card-add picker (a live render would just show an empty map when there's no current rain in the user's area).
 
 For the full release history see [CHANGELOG](https://github.com/Makin-Things/weather-radar-card/blob/master/CHANGELOG.md).
 
