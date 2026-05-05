@@ -88,6 +88,21 @@ preserving pinch-to-zoom, so mobile users can scroll past the card.
 
 ### Open
 
+- **Lightning overlay (Blitzortung)** — proposed for 3.6. Render live
+  lightning strikes from the [Blitzortung HA integration](https://www.home-assistant.io/integrations/blitzortung/)
+  as small `mdi:lightning-bolt-outline` markers, interior coloured by
+  age (white → yellow → orange → red over the integration's max-age
+  window). One-shot pulse animation on appearance. Detection via
+  `hass.config.components.includes('blitzortung')`; toggle disabled
+  with tooltip when not installed. Inherits the integration's distance
+  and age caps (no card-side duplicates). Popup links into the
+  Blitzortung web map at the strike location.
+
+  Full design: [docs/lightning-feature-design.md](lightning-feature-design.md).
+  Implementation roughly mirrors `wildfire-layer.ts` — new file
+  `src/lightning-layer.ts`, editor row in the Hazard Overlays
+  subpage, 11-language i18n keys.
+
 - **Flip README documentation-index links from `nws-alerts` back to `master` at 3.5 release.**
   All `https://github.com/Makin-Things/weather-radar-card/blob/<branch>/...`
   URLs in `README.md` currently point at `blob/nws-alerts/` because the
