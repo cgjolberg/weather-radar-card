@@ -512,7 +512,12 @@ export class RadarPlayer {
     const spinner = this._shadowRoot.getElementById('loading-spinner');
     if (!spinner) return;
     const enabled = this._cfg.show_loading_spinner !== false;
-    const isLoading = enabled && this._frameStatuses.some(s => s === 'loading');
+    // _frameStatuses covers initial load and periodic refresh;
+    // _tilePending catches pan/zoom on attached layers, where edge-tile
+    // fetches don't go through _setSegment(loading).
+    const segLoading = this._frameStatuses.some(s => s === 'loading');
+    const tileLoading = this._radarImage.some(l => (l?._tilePending ?? 0) > 0);
+    const isLoading = enabled && (segLoading || tileLoading);
     spinner.style.display = isLoading ? '' : 'none';
   }
 
@@ -695,9 +700,15 @@ export class RadarPlayer {
   private _createLayer(frame: RadarFrame): FetchTileLayer | FetchWmsTileLayer {
     const dataSource = this._cfg.data_source ?? 'RainViewer';
     const { size: tileSize, zoomOffset } = this._radarTileSize();
+    // Drive the spinner from each layer's load events, so pan/zoom edge
+    // fetches on attached layers light it up too (not just frame status).
+    const wireSpinner = (l: FetchTileLayer | FetchWmsTileLayer): typeof l => {
+      l.on('loading load', () => this._updateLoadingSpinner());
+      return l;
+    };
     if (dataSource === 'NOAA') {
       const isoTime = new Date(frame.time * 1000).toISOString().split('.')[0] + 'Z';
-      return new FetchWmsTileLayer(NOAA_WMS_URL, {
+      return wireSpinner(new FetchWmsTileLayer(NOAA_WMS_URL, {
         layers: NOAA_WMS_LAYER,
         format: 'image/png',
         transparent: true,
@@ -713,7 +724,7 @@ export class RadarPlayer {
         rateLimiter: this._noaaLimiter,
         on429: () => this._onRateLimited(),
         animationOwnsOpacity: true,
-      } as any);
+      } as any));
     }
     if (dataSource === 'DWD') {
       const isoTime = new Date(frame.time * 1000).toISOString().split('.')[0] + 'Z';
@@ -728,7 +739,7 @@ export class RadarPlayer {
         );
         this._dwdSwapLogged = true;
       }
-      return new FetchWmsTileLayer(DWD_WMS_URL, {
+      return wireSpinner(new FetchWmsTileLayer(DWD_WMS_URL, {
         layers: layerName,
         format: 'image/png',
         transparent: true,
@@ -744,13 +755,13 @@ export class RadarPlayer {
         rateLimiter: this._dwdLimiter,
         on429: () => this._onRateLimited(),
         animationOwnsOpacity: true,
-      } as any);
+      } as any));
     }
     const snow = this._cfg.show_snow ? 1 : 0;
     const host = frame.host ?? 'https://tilecache.rainviewer.com';
     // RainViewer encodes tile size as a path segment (256/512/1024/2048).
     // Build the URL with whichever size we picked for this map.
-    return new FetchTileLayer(`${host}${frame.path}/${tileSize}/{z}/{x}/{y}/2/1_${snow}.png`, {
+    return wireSpinner(new FetchTileLayer(`${host}${frame.path}/${tileSize}/{z}/{x}/{y}/2/1_${snow}.png`, {
       detectRetina: false,
       tileSize,
       zoomOffset,
@@ -761,7 +772,7 @@ export class RadarPlayer {
       rateLimiter: this._rainviewerLimiter,
       on429: () => this._onRateLimited(),
       animationOwnsOpacity: true,
-    } as any);
+    } as any));
   }
 
   // Format date and time as separate parts. The bottom-row template
