@@ -29,6 +29,17 @@ const DEFAULT_ICON_SIZE_PX = 14;
 // avoids per-marker timers.
 const AGE_REFRESH_MS = 30 * 1000;
 
+// Custom Leaflet pane name. Sits at z-index 500 — between the default
+// overlayPane (400, where radar tiles + wildfire / alert polygons live)
+// and the default markerPane (600, where home / person / device-tracker
+// markers live). This ordering matches the design doc: lightning is
+// visible over a NWS alert polygon, and the home marker stays on top of
+// any strike that happens to land at the same point. Without this,
+// strikes added after the home marker render above it via DOM order
+// (and the pulse's transform: scale(2) makes the overlap obvious).
+const LIGHTNING_PANE = 'wrc-lightning';
+const LIGHTNING_PANE_Z = 500;
+
 interface Strike {
   ts: number;        // epoch ms when the strike was first observed
   lat: number;
@@ -63,8 +74,21 @@ export class LightningLayer {
   }
 
   start(): void {
+    this._ensurePane();
     this._refreshFromHass();
     this._ageTimer = setInterval(() => this._refreshAges(), AGE_REFRESH_MS);
+  }
+
+  // Idempotent — Leaflet panes are sticky for the map's lifetime. We just
+  // need the pane to exist before the first L.marker(...{pane}) call.
+  // pointer-events: none on the pane (Leaflet's default for marker panes)
+  // lets clicks fall through dead space; .wrc-lightning-icon flips it back
+  // on for the actual icon hit area.
+  private _ensurePane(): void {
+    if (this._map.getPane(LIGHTNING_PANE)) return;
+    const pane = this._map.createPane(LIGHTNING_PANE);
+    pane.style.zIndex = String(LIGHTNING_PANE_Z);
+    pane.style.pointerEvents = 'none';
   }
 
   clear(): void {
@@ -171,7 +195,7 @@ export class LightningLayer {
       iconSize: [size, size],
       className,
     });
-    const marker = L.marker([strike.lat, strike.lon], { icon });
+    const marker = L.marker([strike.lat, strike.lon], { icon, pane: LIGHTNING_PANE });
     // Bind the popup as a factory so distance / bearing / relative time
     // are recomputed at popup-open — the map may have panned and a few
     // seconds may have passed since the strike was added. A stale fixed
