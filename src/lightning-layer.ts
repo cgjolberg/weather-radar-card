@@ -179,10 +179,17 @@ export class LightningLayer {
     const pulseEnabled = cfg.lightning_pulse !== false;
 
     const fill = colorForAge(this._ageSec(strike), this._maxAgeSec());
-    // Inline SVG so the per-strike fill colour can be set directly. Stroke
-    // uses HA's primary text colour so the bolt outline reads on light
-    // and dark basemaps without a per-style branch. Both fill and stroke
-    // get refreshed by _refreshAges() on the 30 s timer.
+    // Inline SVG so the per-strike fill colour can be set directly.
+    //
+    // Stroke is hardcoded #000 (not var(--primary-text-color)) for
+    // reliable contrast: a black outline reads on top of any
+    // yellow/orange/red fill regardless of basemap or HA theme. Using
+    // the theme variable would render a light stroke on dark themes,
+    // which then disappears against a light basemap (light-theme HA
+    // installs commonly use light Carto / OSM tiles too, but the user
+    // can mix-and-match). Stroke width 1.0 (in viewBox units) is heavy
+    // enough to read at the default 14 px icon size. Fill is refreshed
+    // by _refreshAges() on the 30 s timer.
     //
     // The pulse animation lives on the SVG, NOT the divIcon's outer
     // container — Leaflet owns the container's `transform` to position
@@ -195,7 +202,7 @@ export class LightningLayer {
     // keeps Leaflet's positioning intact.
     const svgClass = pulseEnabled ? 'wrc-lightning-pulse' : '';
     const html = `<svg class="${svgClass}" viewBox="0 0 24 24" width="${size}" height="${size}" style="display:block;overflow:visible">`
-      + `<path fill="${fill}" stroke="var(--primary-text-color, #000)" stroke-width="0.6" stroke-linejoin="round" d="${LIGHTNING_BOLT_PATH}"/>`
+      + `<path fill="${fill}" stroke="#000" stroke-width="1" stroke-linejoin="round" d="${LIGHTNING_BOLT_PATH}"/>`
       + `</svg>`;
 
     const icon = L.divIcon({

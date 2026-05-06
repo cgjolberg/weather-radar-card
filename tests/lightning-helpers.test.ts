@@ -75,12 +75,8 @@ describe('lerpHex', () => {
 });
 
 describe('colorForAge', () => {
-  it('is white at t=0 (fresh strike)', () => {
-    expect(colorForAge(0, 600)).toBe('#ffffff');
-  });
-
-  it('is yellow at t=0.25 of max age', () => {
-    expect(colorForAge(150, 600)).toBe('#ffeb3b');
+  it('is yellow at t=0 (fresh strike — drops white from the original 4-stop spec for visibility on light basemaps)', () => {
+    expect(colorForAge(0, 600)).toBe('#ffeb3b');
   });
 
   it('is orange at t=0.5 of max age', () => {
@@ -95,16 +91,16 @@ describe('colorForAge', () => {
     expect(colorForAge(99999, 600)).toBe('#ff0000');
   });
 
-  it('clamps to white for negative ages (clock skew)', () => {
-    expect(colorForAge(-30, 600)).toBe('#ffffff');
+  it('clamps to yellow for negative ages (clock skew)', () => {
+    expect(colorForAge(-30, 600)).toBe('#ffeb3b');
   });
 
-  it('returns white when maxAgeSec is zero (defensive — no divide-by-zero)', () => {
-    expect(colorForAge(50, 0)).toBe('#ffffff');
+  it('returns yellow when maxAgeSec is zero (defensive — no divide-by-zero)', () => {
+    expect(colorForAge(50, 0)).toBe('#ffeb3b');
   });
 
-  it('returns white when maxAgeSec is negative', () => {
-    expect(colorForAge(50, -10)).toBe('#ffffff');
+  it('returns yellow when maxAgeSec is negative', () => {
+    expect(colorForAge(50, -10)).toBe('#ffeb3b');
   });
 
   it('default max age constant matches the Blitzortung integration default (verified empirically)', () => {

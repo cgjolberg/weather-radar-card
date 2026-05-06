@@ -45,23 +45,30 @@ function toHex2(n: number): string {
 }
 
 // Map a strike's age (seconds since detection) to a fill colour that
-// communicates "freshness" — the same visual language Blitzortung's own
-// web map uses, so users coming from there feel at home. Four-stop
-// gradient over the configured max-age window:
+// communicates "freshness". Three-stop gradient over the configured
+// max-age window:
 //
-//   t=0       white
-//   t=0.25    yellow
+//   t=0       yellow
 //   t=0.5     orange
 //   t=1       red
+//
+// The original spec called for a 4-stop white→yellow→orange→red gradient
+// modelled on Blitzortung's own web map — but that map runs against a
+// dark basemap where pure-white reads fine, while we render against
+// light Carto / OSM / satellite tiles where it disappears. Dropping
+// white also fixes the perceived "they never change colour" problem on
+// the integration's default 7200 s (2 h) window: the white→yellow phase
+// would have covered the first 30 minutes of every strike's life,
+// making aging invisible. With three stops, aging is observable by
+// 60 min (the orange midpoint).
 //
 // Edges held at the endpoint colour (t<0 and t>1 both clamp). Defensive
 // against a zero / negative maxAgeSec — returns the start colour rather
 // than dividing by zero.
 export function colorForAge(ageSec: number, maxAgeSec: number): string {
-  if (!(maxAgeSec > 0)) return '#ffffff';
+  if (!(maxAgeSec > 0)) return '#ffeb3b';
   const t = Math.max(0, Math.min(1, ageSec / maxAgeSec));
-  if (t < 0.25) return lerpHex('#ffffff', '#ffeb3b', t / 0.25);          // white → yellow
-  if (t < 0.5)  return lerpHex('#ffeb3b', '#ff9800', (t - 0.25) / 0.25); // yellow → orange
+  if (t < 0.5) return lerpHex('#ffeb3b', '#ff9800', t / 0.5);            // yellow → orange
   return                lerpHex('#ff9800', '#ff0000', (t - 0.5) / 0.5);  // orange → red
 }
 
