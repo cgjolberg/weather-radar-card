@@ -44,32 +44,49 @@ function toHex2(n: number): string {
   return n.toString(16).padStart(2, '0');
 }
 
-// Map a strike's age (seconds since detection) to a fill colour that
-// communicates "freshness". Three-stop gradient over the configured
-// max-age window:
+// How long a freshly-arrived strike is rendered as a bolt before the
+// layer swaps it to a plus-sign. Matches the "initial flash + 30
+// seconds" UX brief: the bolt + pulse animation are the "happening
+// right now" indicator; after 30 s the strike settles into the
+// Blitzortung-style cross with age-derived colour. 30 s lines up with
+// _refreshAges()'s tick rate, so the swap is at most one tick late.
+export const BOLT_DURATION_SEC = 30;
+
+// Map a strike's age (seconds since detection) to the post-bolt + sign's
+// fill colour. Six-stop gradient mirroring Blitzortung's web map
+// convention: white when fresh, ageing through yellow / orange / coral
+// / red / dark red over the strike's lifetime. (Blitzortung renders
+// this in 20-minute discrete buckets; we interpolate continuously so
+// the colour change reads as gradual fade rather than stepped jumps.)
 //
-//   t=0       yellow
-//   t=0.5     orange
-//   t=1       red
-//
-// The original spec called for a 4-stop white→yellow→orange→red gradient
-// modelled on Blitzortung's own web map — but that map runs against a
-// dark basemap where pure-white reads fine, while we render against
-// light Carto / OSM / satellite tiles where it disappears. Dropping
-// white also fixes the perceived "they never change colour" problem on
-// the integration's default 7200 s (2 h) window: the white→yellow phase
-// would have covered the first 30 minutes of every strike's life,
-// making aging invisible. With three stops, aging is observable by
-// 60 min (the orange midpoint).
+// White at t=0 is fine here even on light basemaps — the + sign is
+// drawn with a black stroke + drop-shadow halo, so the shape is
+// outlined regardless of fill colour.
 //
 // Edges held at the endpoint colour (t<0 and t>1 both clamp). Defensive
 // against a zero / negative maxAgeSec — returns the start colour rather
 // than dividing by zero.
+const COLOR_STOPS: ReadonlyArray<{ t: number; c: string }> = [
+  { t: 0.0, c: '#ffffff' },   // white       — just emerged from bolt phase
+  { t: 0.2, c: '#ffeb3b' },   // yellow
+  { t: 0.4, c: '#ff9800' },   // orange
+  { t: 0.6, c: '#ff6347' },   // coral
+  { t: 0.8, c: '#ff0000' },   // red
+  { t: 1.0, c: '#8b0000' },   // dark red    — oldest, near max-age
+];
+
 export function colorForAge(ageSec: number, maxAgeSec: number): string {
-  if (!(maxAgeSec > 0)) return '#ffeb3b';
+  if (!(maxAgeSec > 0)) return COLOR_STOPS[0].c;
   const t = Math.max(0, Math.min(1, ageSec / maxAgeSec));
-  if (t < 0.5) return lerpHex('#ffeb3b', '#ff9800', t / 0.5);            // yellow → orange
-  return                lerpHex('#ff9800', '#ff0000', (t - 0.5) / 0.5);  // orange → red
+  for (let i = 0; i < COLOR_STOPS.length - 1; i++) {
+    const a = COLOR_STOPS[i];
+    const b = COLOR_STOPS[i + 1];
+    if (t <= b.t) {
+      const span = b.t - a.t;
+      return lerpHex(a.c, b.c, span > 0 ? (t - a.t) / span : 0);
+    }
+  }
+  return COLOR_STOPS[COLOR_STOPS.length - 1].c;
 }
 
 // Compute the bearing from one lat/lon to another and bucket it into one

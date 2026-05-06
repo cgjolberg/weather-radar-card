@@ -2,11 +2,12 @@
 import * as L from 'leaflet';
 import { HomeAssistant } from 'custom-card-helpers';
 import { WeatherRadarCardConfig } from './types';
-import { LIGHTNING_BOLT_PATH } from './marker-icon';
+import { LIGHTNING_BOLT_PATH, LIGHTNING_PLUS_PATH } from './marker-icon';
 import { localize } from './localize/localize';
 import { haversineKm } from './geo-utils';
 import { escapeHtml } from './string-utils';
 import {
+  BOLT_DURATION_SEC,
   DEFAULT_BLITZORTUNG_MAX_AGE_SEC,
   bearingCardinal,
   colorForAge,
@@ -23,27 +24,49 @@ import {
 // hass.states for new/gone strikes and paint markers on the map.
 
 const DEFAULT_ICON_SIZE_PX = 14;
+// Bolts render at 1.3× the + size — the "happening now" indicator
+// reads better when it's visibly larger than the steady-state markers
+// it sits among. Applied at icon creation; if the user sets
+// lightning_icon_size, the bolt stays proportionally larger.
+const BOLT_SIZE_RATIO = 1.3;
 // 30 s recompute of the age-derived fill — the design doc's chosen
 // cadence. Smoothing the age across 30 s on a multi-thousand-second
 // gradient is visually indistinguishable from continuous fade and
 // avoids per-marker timers.
 const AGE_REFRESH_MS = 30 * 1000;
 
-// Custom Leaflet pane name. Sits at z-index 500 — between the default
-// overlayPane (400, where radar tiles + wildfire / alert polygons live)
-// and the default markerPane (600, where home / person / device-tracker
+// Two custom Leaflet panes. Both sit between the default overlayPane
+// (400, where radar tiles + wildfire / alert polygons live) and the
+// default markerPane (600, where home / person / device-tracker
 // markers live). This ordering matches the design doc: lightning is
-// visible over a NWS alert polygon, and the home marker stays on top of
-// any strike that happens to land at the same point. Without this,
-// strikes added after the home marker render above it via DOM order
-// (and the pulse's transform: scale(2) makes the overlap obvious).
+// visible over a NWS alert polygon, and the home marker stays on top
+// of any strike at the same point.
+//
+// The OUTLINE pane (z 499) carries the black-stroked path of each +
+// sign on its own. The FILL pane (z 500) carries the coloured-fill
+// path. Splitting them solves the "black blob" problem at low zoom
+// when many strikes pile up at the same screen location: the outlines
+// stack and merge harmlessly underneath, while the topmost coloured
+// fill stays cleanly visible on top instead of being lost under
+// stacked strokes.
+//
+// Bolt-phase markers go on the FILL pane only — they're a single
+// glyph and don't suffer the same stacking issue (bolt phase is
+// short, and the bolts are bigger than the +s).
 const LIGHTNING_PANE = 'wrc-lightning';
 const LIGHTNING_PANE_Z = 500;
+const LIGHTNING_OUTLINE_PANE = 'wrc-lightning-outline';
+const LIGHTNING_OUTLINE_PANE_Z = 499;
 
 interface Strike {
   ts: number;        // epoch ms when the strike was first observed
   lat: number;
   lon: number;
+  // Two-phase visual: bolt (with pulse) for the first BOLT_DURATION_SEC,
+  // then plus-sign for the rest of the lifetime. Tracked here so a
+  // strike that crosses the threshold between age refreshes only swaps
+  // its icon DOM once (setIcon rebuilds the marker element).
+  isBolt: boolean;
 }
 
 export class LightningLayer {
@@ -51,12 +74,21 @@ export class LightningLayer {
   private _getConfig: () => WeatherRadarCardConfig;
   private _hass: HomeAssistant | undefined;
 
-  // Two parallel maps keyed by entity_id (geo_location.lightning_strike_*).
-  // Splitting strike data from the Leaflet marker keeps _refreshAges()
+  // Three parallel maps keyed by entity_id (geo_location.lightning_strike_*).
+  // Splitting strike data from the Leaflet markers keeps _refreshAges()
   // small — it iterates _strikes and recolours the matching marker, no
   // need to dig coords or timestamps back out of the marker DOM.
+  //
+  // _markers is the FILL marker — bolt during the first 30 s, then a
+  // coloured + sign on the LIGHTNING_PANE. Popups bind here.
+  // _outlines is the OUTLINE marker — only present in the + phase, on
+  // the LIGHTNING_OUTLINE_PANE one z-step lower. Non-interactive.
+  // Splitting + signs into two markers on different panes is what
+  // prevents stacked outlines obscuring stacked colours at low zoom:
+  // outlines pile up harmlessly underneath, fills stay clean on top.
   private _strikes: Map<string, Strike> = new Map();
   private _markers: Map<string, L.Marker> = new Map();
+  private _outlines: Map<string, L.Marker> = new Map();
 
   private _ageTimer: ReturnType<typeof setInterval> | null = null;
   // Set in pause(), cleared in resume(). Differs from the wildfire/alerts
@@ -74,29 +106,36 @@ export class LightningLayer {
   }
 
   start(): void {
-    this._ensurePane();
+    this._ensurePanes();
     this._refreshFromHass();
     this._ageTimer = setInterval(() => this._refreshAges(), AGE_REFRESH_MS);
   }
 
   // Idempotent — Leaflet panes are sticky for the map's lifetime. We just
-  // need the pane to exist before the first L.marker(...{pane}) call.
-  // pointer-events: none on the pane (Leaflet's default for marker panes)
-  // lets clicks fall through dead space; .wrc-lightning-icon flips it back
-  // on for the actual icon hit area.
-  private _ensurePane(): void {
-    if (this._map.getPane(LIGHTNING_PANE)) return;
-    const pane = this._map.createPane(LIGHTNING_PANE);
-    pane.style.zIndex = String(LIGHTNING_PANE_Z);
-    pane.style.pointerEvents = 'none';
+  // need both panes to exist before the first L.marker(...{pane}) call.
+  // pointer-events: none on each pane (Leaflet's default for marker
+  // panes) lets clicks fall through dead space; .wrc-lightning-icon
+  // flips it back on for the actual icon hit area on the FILL pane.
+  // Outline-pane markers stay non-interactive (interactive: false on the
+  // L.marker) — clicks hit the fill on top, which carries the popup.
+  private _ensurePanes(): void {
+    for (const [name, z] of [
+      [LIGHTNING_PANE, LIGHTNING_PANE_Z],
+      [LIGHTNING_OUTLINE_PANE, LIGHTNING_OUTLINE_PANE_Z],
+    ] as const) {
+      if (this._map.getPane(name)) continue;
+      const pane = this._map.createPane(name);
+      pane.style.zIndex = String(z);
+      pane.style.pointerEvents = 'none';
+    }
   }
 
   clear(): void {
     if (this._ageTimer) { clearInterval(this._ageTimer); this._ageTimer = null; }
-    for (const marker of this._markers.values()) {
-      this._map.removeLayer(marker);
-    }
+    for (const marker of this._markers.values()) this._map.removeLayer(marker);
+    for (const outline of this._outlines.values()) this._map.removeLayer(outline);
     this._markers.clear();
+    this._outlines.clear();
     this._strikes.clear();
   }
 
@@ -168,97 +207,229 @@ export class LightningLayer {
       const lat = attrs.latitude;
       const lon = attrs.longitude;
       if (typeof lat !== 'number' || typeof lon !== 'number') continue;
-      out.set(id, { ts: parseStrikeTimestamp(st), lat, lon });
+      const ts = parseStrikeTimestamp(st);
+      // Initial-form decision happens here so a strike we discover well
+      // past its 30 s window (e.g. card just mounted with strikes
+      // already present) renders as a plus rather than briefly flashing
+      // as a bolt.
+      const isBolt = (Date.now() - ts) / 1000 < BOLT_DURATION_SEC;
+      out.set(id, { ts, lat, lon, isBolt });
     }
     return out;
   }
 
+  // Strike paint order:
+  //   - Within each pane, Leaflet renders markers in DOM-insertion
+  //     order. Newer = inserted later = on top.
+  //   - _collectStrikes walks Object.entries(hass.states), which yields
+  //     entities in HA's creation order — Blitzortung adds them as
+  //     strikes arrive, so newer strikes naturally come later.
+  //   - _addMarker adds new arrivals at the end of each pane.
+  //   - The bolt → + swap uses setIcon (in-place mutation, no DOM
+  //     re-insertion), so a strike's z-position relative to its peers
+  //     is preserved across the swap.
+  // Net effect: newest-on-top, matching Blitzortung's own web map.
   private _addMarker(id: string, strike: Strike): void {
     const cfg = this._getConfig();
-    const size = cfg.lightning_icon_size ?? DEFAULT_ICON_SIZE_PX;
-    const pulseEnabled = cfg.lightning_pulse !== false;
+    const plusSize = cfg.lightning_icon_size ?? DEFAULT_ICON_SIZE_PX;
+    const boltSize = Math.round(plusSize * BOLT_SIZE_RATIO);
+    // Pulse only fires for strikes still in their bolt phase. A strike
+    // we discover already past 30 s (card-mount-with-existing-strikes
+    // case) renders straight as a + with no flash.
+    const pulseEnabled = cfg.lightning_pulse !== false && strike.isBolt;
 
-    const fill = colorForAge(this._ageSec(strike), this._maxAgeSec());
-    // Inline SVG so the per-strike fill colour can be set directly.
-    //
-    // Stroke is hardcoded #000 (not var(--primary-text-color)) for
-    // reliable contrast: a black outline reads on top of any
-    // yellow/orange/red fill regardless of basemap or HA theme. Using
-    // the theme variable would render a light stroke on dark themes,
-    // which then disappears against a light basemap (light-theme HA
-    // installs commonly use light Carto / OSM tiles too, but the user
-    // can mix-and-match). Stroke width 1.0 (in viewBox units) is heavy
-    // enough to read at the default 14 px icon size. Fill is refreshed
-    // by _refreshAges() on the 30 s timer.
-    //
-    // The pulse animation lives on the SVG, NOT the divIcon's outer
-    // container — Leaflet owns the container's `transform` to position
-    // the marker, and only one CSS transform value applies per element
-    // (latest wins). If the pulse class went on the container, our
-    // `transform: scale(2)` would clobber Leaflet's
-    // `transform: translate3d(...)` for the duration of the keyframe,
-    // visually snapping every flashing strike to the lightning pane's
-    // origin (≈ map centre / home location). Animating the inner SVG
-    // keeps Leaflet's positioning intact.
-    const svgClass = pulseEnabled ? 'wrc-lightning-pulse' : '';
-    const html = `<svg class="${svgClass}" viewBox="0 0 24 24" width="${size}" height="${size}" style="display:block;overflow:visible">`
-      + `<path fill="${fill}" stroke="#000" stroke-width="1" stroke-linejoin="round" d="${LIGHTNING_BOLT_PATH}"/>`
-      + `</svg>`;
-
-    const icon = L.divIcon({
-      html,
-      iconSize: [size, size],
-      className: 'wrc-lightning-icon',
-    });
-    const marker = L.marker([strike.lat, strike.lon], { icon, pane: LIGHTNING_PANE });
-    // Bind the popup as a factory so distance / bearing / relative time
-    // are recomputed at popup-open — the map may have panned and a few
-    // seconds may have passed since the strike was added. A stale fixed
-    // popup would show the wrong "X s ago".
-    marker.bindPopup(() => this._popupHtml(strike), {
-      autoPan: true,
-      autoPanPadding: [12, 12],
-      maxHeight: this._popupMaxHeight(),
-    });
-    marker.addTo(this._map);
-    this._markers.set(id, marker);
-
-    // Remove the pulse class from the SVG once the animation finishes,
-    // so a future re-render of this marker doesn't re-fire it. Listen on
-    // the outer divIcon container — animationend bubbles up — but mutate
-    // the SVG (which is the element actually carrying the class).
-    if (pulseEnabled) {
-      const el = marker.getElement();
-      if (el) {
-        const handler = (): void => {
-          const svg = el.querySelector('svg');
-          if (svg) svg.classList.remove('wrc-lightning-pulse');
-          el.removeEventListener('animationend', handler);
-        };
-        el.addEventListener('animationend', handler);
-      }
+    if (strike.isBolt) {
+      // Bolt phase: single marker, no separate outline (the bolt's own
+      // path stroke + halo do that work, and bolts don't suffer the
+      // same stacking-blob problem +s do because they only last 30 s
+      // and are bigger).
+      const marker = L.marker([strike.lat, strike.lon], {
+        icon: L.divIcon({
+          html: this._boltSvg(boltSize, pulseEnabled),
+          iconSize: [boltSize, boltSize],
+          className: 'wrc-lightning-icon',
+        }),
+        pane: LIGHTNING_PANE,
+      });
+      marker.bindPopup(() => this._popupHtml(strike), {
+        autoPan: true, autoPanPadding: [12, 12], maxHeight: this._popupMaxHeight(),
+      });
+      marker.addTo(this._map);
+      this._markers.set(id, marker);
+      if (pulseEnabled) this._wirePulseCleanup(marker);
+      return;
     }
+
+    // Plus phase: split into FILL + OUTLINE markers on different panes
+    // so stacked outlines don't obscure stacked colour fills.
+    const fillColor = colorForAge(this._ageSec(strike), this._maxAgeSec());
+    this._addPlusMarkers(id, strike, plusSize, fillColor);
+  }
+
+  // Build and attach the FILL + OUTLINE marker pair for a strike in the
+  // + phase. Popup binds to the FILL marker (which sits on the higher
+  // pane and intercepts clicks); the outline is non-interactive.
+  private _addPlusMarkers(id: string, strike: Strike, size: number, fillColor: string): void {
+    const fillMarker = L.marker([strike.lat, strike.lon], {
+      icon: L.divIcon({
+        html: this._plusFillSvg(size, fillColor),
+        iconSize: [size, size],
+        className: 'wrc-lightning-icon',
+      }),
+      pane: LIGHTNING_PANE,
+    });
+    fillMarker.bindPopup(() => this._popupHtml(strike), {
+      autoPan: true, autoPanPadding: [12, 12], maxHeight: this._popupMaxHeight(),
+    });
+    fillMarker.addTo(this._map);
+    this._markers.set(id, fillMarker);
+
+    const outlineMarker = L.marker([strike.lat, strike.lon], {
+      icon: L.divIcon({
+        html: this._plusOutlineSvg(size),
+        iconSize: [size, size],
+        className: 'wrc-lightning-icon',
+      }),
+      pane: LIGHTNING_OUTLINE_PANE,
+      interactive: false,
+    });
+    outlineMarker.addTo(this._map);
+    this._outlines.set(id, outlineMarker);
+  }
+
+  // SVG builders — one per phase. Both share the readability halo
+  // (CSS drop-shadow) which gives every marker a 2 px black outline
+  // against any basemap or radar overlay colour, regardless of stroke
+  // colour. Cheaper and more reliable than nesting concentric SVG
+  // shapes for a manual halo.
+  //
+  // The pulse animation class lives on the SVG, NOT the divIcon's
+  // outer container — Leaflet owns the container's `transform` to
+  // position the marker, and only one CSS transform value applies per
+  // element (latest wins). If the pulse class went on the container,
+  // our `transform: scale(2)` would clobber Leaflet's
+  // `transform: translate3d(...)` for the duration of the keyframe,
+  // visually snapping every flashing strike to the lightning pane's
+  // origin (≈ map centre). Animating the inner SVG keeps Leaflet's
+  // positioning intact.
+  private static readonly HALO = 'filter:drop-shadow(0 0 1px #000) drop-shadow(0 0 1px #000);';
+
+  // Bolt phase (0–30 s): white fill, thin red outline. The red echoes
+  // the "danger / immediate" colour language without dominating the
+  // shape; the halo gives it darker contrast against light basemaps.
+  // We don't use the age gradient here (would be near-white anyway
+  // across the 30 s window). Bolt renders at 1.3× the + size so the
+  // "fresh!" indicator stands out against the older + markers
+  // around it.
+  private _boltSvg(size: number, pulse: boolean): string {
+    const cls = pulse ? 'wrc-lightning-pulse' : '';
+    return `<svg class="${cls}" viewBox="0 0 24 24" width="${size}" height="${size}" style="display:block;overflow:visible;${LightningLayer.HALO}">`
+      + `<path fill="#fff" stroke="#ff0000" stroke-width="1" stroke-linejoin="round" d="${LIGHTNING_BOLT_PATH}"/>`
+      + `</svg>`;
+  }
+
+  // Plus phase (30 s+) FILL marker: just the coloured + with no
+  // stroke or halo — the outline marker on the lower pane provides
+  // both. Stacked colours read clean (no per-marker stroke noise).
+  private _plusFillSvg(size: number, fillColor: string): string {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" style="display:block;overflow:visible">`
+      + `<path fill="${fillColor}" stroke="none" d="${LIGHTNING_PLUS_PATH}"/>`
+      + `</svg>`;
+  }
+
+  // Plus phase (30 s+) OUTLINE marker: black-stroked + with no fill,
+  // plus the drop-shadow halo for background contrast. Sits one z-step
+  // below the fill marker, so when many strikes pile up at the same
+  // location the outlines stack harmlessly underneath while the
+  // topmost colour stays clean and visible. Stroke 1.5 in viewBox
+  // units ≈ 1 px at the default 14 px icon size.
+  private _plusOutlineSvg(size: number): string {
+    return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" style="display:block;overflow:visible;${LightningLayer.HALO}">`
+      + `<path fill="none" stroke="#000" stroke-width="1.5" stroke-linejoin="miter" d="${LIGHTNING_PLUS_PATH}"/>`
+      + `</svg>`;
+  }
+
+  // Remove the pulse class from the SVG once the animation finishes,
+  // so a future re-render of this marker doesn't re-fire it. Listen on
+  // the outer divIcon container — animationend bubbles up — but mutate
+  // the SVG (which is the element actually carrying the class).
+  private _wirePulseCleanup(marker: L.Marker): void {
+    const el = marker.getElement();
+    if (!el) return;
+    const handler = (): void => {
+      const svg = el.querySelector('svg');
+      if (svg) svg.classList.remove('wrc-lightning-pulse');
+      el.removeEventListener('animationend', handler);
+    };
+    el.addEventListener('animationend', handler);
   }
 
   private _removeMarker(id: string): void {
     const marker = this._markers.get(id);
-    if (!marker) return;
-    this._map.removeLayer(marker);
-    this._markers.delete(id);
+    if (marker) {
+      this._map.removeLayer(marker);
+      this._markers.delete(id);
+    }
+    const outline = this._outlines.get(id);
+    if (outline) {
+      this._map.removeLayer(outline);
+      this._outlines.delete(id);
+    }
   }
 
-  // Re-paint each visible marker's fill. Cheap — tens of markers in
-  // typical use, single SVG attribute write per marker.
+  // Re-paint each + sign's fill, and swap bolt → plus once a strike
+  // crosses BOLT_DURATION_SEC. The swap mutates the existing fill
+  // marker in place (setIcon swaps the icon HTML but keeps the marker
+  // and its popup binding) AND attaches the OUTLINE marker on the
+  // lower pane. The colour-only refresh just mutates the fill marker's
+  // <path> fill attribute. Bolt-phase markers are skipped — their
+  // colour (white fill / red stroke) doesn't depend on age.
   private _refreshAges(): void {
     const max = this._maxAgeSec();
+    const cfg = this._getConfig();
+    const plusSize = cfg.lightning_icon_size ?? DEFAULT_ICON_SIZE_PX;
     for (const [id, strike] of this._strikes) {
       const marker = this._markers.get(id);
       if (!marker) continue;
+      const ageSec = this._ageSec(strike);
+
+      // Form transition (one-way: bolt → plus). Swap the existing
+      // marker's icon to the FILL SVG, then attach a new OUTLINE
+      // marker on the lower pane. The popup binding survives setIcon
+      // so users keep the click target. We don't re-fire the pulse —
+      // it's a "just appeared!" cue, not recurring.
+      if (strike.isBolt && ageSec >= BOLT_DURATION_SEC) {
+        strike.isBolt = false;
+        const fill = colorForAge(ageSec, max);
+        marker.setIcon(L.divIcon({
+          html: this._plusFillSvg(plusSize, fill),
+          iconSize: [plusSize, plusSize],
+          className: 'wrc-lightning-icon',
+        }));
+        const outlineMarker = L.marker([strike.lat, strike.lon], {
+          icon: L.divIcon({
+            html: this._plusOutlineSvg(plusSize),
+            iconSize: [plusSize, plusSize],
+            className: 'wrc-lightning-icon',
+          }),
+          pane: LIGHTNING_OUTLINE_PANE,
+          interactive: false,
+        });
+        outlineMarker.addTo(this._map);
+        this._outlines.set(id, outlineMarker);
+        continue;
+      }
+
+      // Bolt phase has fixed colours — nothing to refresh.
+      if (strike.isBolt) continue;
+
+      // Plus phase: cheap fill-only refresh on the FILL marker. The
+      // OUTLINE marker is age-independent (always black) — leave it.
       const el = marker.getElement();
       if (!el) continue;
-      const path = el.querySelector('svg path') as SVGPathElement | null;
-      if (!path) continue;
-      path.setAttribute('fill', colorForAge(this._ageSec(strike), max));
+      const pathEl = el.querySelector('svg path') as SVGPathElement | null;
+      if (!pathEl) continue;
+      pathEl.setAttribute('fill', colorForAge(ageSec, max));
     }
   }
 

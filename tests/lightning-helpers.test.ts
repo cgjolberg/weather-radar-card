@@ -8,6 +8,7 @@ import {
   bearingCardinal,
   relativeTime,
   formatBlitzortungUrl,
+  BOLT_DURATION_SEC,
   DEFAULT_BLITZORTUNG_MAX_AGE_SEC,
 } from '../src/lightning-helpers';
 
@@ -75,36 +76,56 @@ describe('lerpHex', () => {
 });
 
 describe('colorForAge', () => {
-  it('is yellow at t=0 (fresh strike — drops white from the original 4-stop spec for visibility on light basemaps)', () => {
-    expect(colorForAge(0, 600)).toBe('#ffeb3b');
+  // Six-stop Blitzortung gradient: white → yellow → orange → coral → red → dark red.
+  // Stops at t = 0, 0.2, 0.4, 0.6, 0.8, 1.0. White is fine even on light
+  // basemaps because the + sign's black stroke + drop-shadow halo carry
+  // the shape outline regardless of fill colour.
+  it('is white at t=0 (matches Blitzortung web map)', () => {
+    expect(colorForAge(0, 600)).toBe('#ffffff');
   });
 
-  it('is orange at t=0.5 of max age', () => {
-    expect(colorForAge(300, 600)).toBe('#ff9800');
+  it('is yellow at t=0.2 of max age', () => {
+    expect(colorForAge(120, 600)).toBe('#ffeb3b');
   });
 
-  it('is red at t=1.0 of max age', () => {
-    expect(colorForAge(600, 600)).toBe('#ff0000');
+  it('is orange at t=0.4 of max age', () => {
+    expect(colorForAge(240, 600)).toBe('#ff9800');
   });
 
-  it('clamps to red for ages past max', () => {
-    expect(colorForAge(99999, 600)).toBe('#ff0000');
+  it('is coral at t=0.6 of max age', () => {
+    expect(colorForAge(360, 600)).toBe('#ff6347');
   });
 
-  it('clamps to yellow for negative ages (clock skew)', () => {
-    expect(colorForAge(-30, 600)).toBe('#ffeb3b');
+  it('is red at t=0.8 of max age', () => {
+    expect(colorForAge(480, 600)).toBe('#ff0000');
   });
 
-  it('returns yellow when maxAgeSec is zero (defensive — no divide-by-zero)', () => {
-    expect(colorForAge(50, 0)).toBe('#ffeb3b');
+  it('is dark red at t=1.0 of max age', () => {
+    expect(colorForAge(600, 600)).toBe('#8b0000');
   });
 
-  it('returns yellow when maxAgeSec is negative', () => {
-    expect(colorForAge(50, -10)).toBe('#ffeb3b');
+  it('clamps to dark red for ages past max', () => {
+    expect(colorForAge(99999, 600)).toBe('#8b0000');
+  });
+
+  it('clamps to white for negative ages (clock skew)', () => {
+    expect(colorForAge(-30, 600)).toBe('#ffffff');
+  });
+
+  it('returns white when maxAgeSec is zero (defensive — no divide-by-zero)', () => {
+    expect(colorForAge(50, 0)).toBe('#ffffff');
+  });
+
+  it('returns white when maxAgeSec is negative', () => {
+    expect(colorForAge(50, -10)).toBe('#ffffff');
   });
 
   it('default max age constant matches the Blitzortung integration default (verified empirically)', () => {
     expect(DEFAULT_BLITZORTUNG_MAX_AGE_SEC).toBe(7200);
+  });
+
+  it('bolt duration constant matches the design ("initial flash + 30 seconds")', () => {
+    expect(BOLT_DURATION_SEC).toBe(30);
   });
 
   it('progresses monotonically through the gradient (no backwards segments)', () => {
