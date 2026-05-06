@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.6.0-alpha] - 2026-05-05
+## [3.6.0-alpha1] - 2026-05-06
 
-> First alpha cut of the 3.6 line. Single new feature: a lightning overlay sourced from the Blitzortung HA integration. No external HTTP from the card — the integration handles all the data plumbing; we just render.
+> First alpha cut of the 3.6 line. New feature: a lightning overlay sourced from the Blitzortung HA integration. No external HTTP from the card — the integration handles all the data plumbing; we just render.
+>
+> Also includes the tile-active fix and the radar pan/zoom no-teardown perf improvement (PRs [#130](https://github.com/Makin-Things/weather-radar-card/pull/130) + [#131](https://github.com/Makin-Things/weather-radar-card/pull/131) from [@genericJE](https://github.com/genericJE), already on master) — they're carried through this alpha by virtue of merging master in.
+>
+> **Coming in 3.6.0-beta1:** the DWD coverage-mask pulse fix ([#132](https://github.com/Makin-Things/weather-radar-card/pull/132)) and the wind overlay ([#133](https://github.com/Makin-Things/weather-radar-card/pull/133)) — both pending review feedback addressed by [@genericJE](https://github.com/genericJE). 3.6.0 stable will consolidate alpha1 + beta1.
 
 ### Added
 
@@ -358,8 +362,8 @@ Multi-marker overhaul. **Breaking:** single-marker config fields (`show_marker`,
 
 For changes in versions prior to 2.0.4, please refer to the git commit history.
 
-[Unreleased]: https://github.com/Makin-Things/weather-radar-card/compare/v3.6.0-alpha...HEAD
-[3.6.0-alpha]: https://github.com/Makin-Things/weather-radar-card/compare/v3.5.0...v3.6.0-alpha
+[Unreleased]: https://github.com/Makin-Things/weather-radar-card/compare/v3.6.0-alpha1...HEAD
+[3.6.0-alpha1]: https://github.com/Makin-Things/weather-radar-card/compare/v3.5.0...v3.6.0-alpha1
 [3.5.0]: https://github.com/Makin-Things/weather-radar-card/compare/v3.4.0...v3.5.0
 [3.4.0]: https://github.com/Makin-Things/weather-radar-card/compare/v3.3.0...v3.4.0
 [3.3.0]: https://github.com/Makin-Things/weather-radar-card/compare/v3.2.0-beta...v3.3.0
