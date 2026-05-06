@@ -183,17 +183,25 @@ export class LightningLayer {
     // uses HA's primary text colour so the bolt outline reads on light
     // and dark basemaps without a per-style branch. Both fill and stroke
     // get refreshed by _refreshAges() on the 30 s timer.
-    const html = `<svg viewBox="0 0 24 24" width="${size}" height="${size}" style="display:block;overflow:visible">`
+    //
+    // The pulse animation lives on the SVG, NOT the divIcon's outer
+    // container — Leaflet owns the container's `transform` to position
+    // the marker, and only one CSS transform value applies per element
+    // (latest wins). If the pulse class went on the container, our
+    // `transform: scale(2)` would clobber Leaflet's
+    // `transform: translate3d(...)` for the duration of the keyframe,
+    // visually snapping every flashing strike to the lightning pane's
+    // origin (≈ map centre / home location). Animating the inner SVG
+    // keeps Leaflet's positioning intact.
+    const svgClass = pulseEnabled ? 'wrc-lightning-pulse' : '';
+    const html = `<svg class="${svgClass}" viewBox="0 0 24 24" width="${size}" height="${size}" style="display:block;overflow:visible">`
       + `<path fill="${fill}" stroke="var(--primary-text-color, #000)" stroke-width="0.6" stroke-linejoin="round" d="${LIGHTNING_BOLT_PATH}"/>`
       + `</svg>`;
 
-    const className = pulseEnabled
-      ? 'wrc-lightning-icon wrc-lightning-pulse'
-      : 'wrc-lightning-icon';
     const icon = L.divIcon({
       html,
       iconSize: [size, size],
-      className,
+      className: 'wrc-lightning-icon',
     });
     const marker = L.marker([strike.lat, strike.lon], { icon, pane: LIGHTNING_PANE });
     // Bind the popup as a factory so distance / bearing / relative time
@@ -208,16 +216,16 @@ export class LightningLayer {
     marker.addTo(this._map);
     this._markers.set(id, marker);
 
-    // The pulse class triggers a one-shot CSS keyframe animation on the
-    // outer divIcon container. Remove the class once the animation
-    // finishes so a future re-render of this marker doesn't re-fire.
-    // Skip when reduced-motion is preferred — the CSS already disables
-    // the animation; this just keeps the className tidy.
+    // Remove the pulse class from the SVG once the animation finishes,
+    // so a future re-render of this marker doesn't re-fire it. Listen on
+    // the outer divIcon container — animationend bubbles up — but mutate
+    // the SVG (which is the element actually carrying the class).
     if (pulseEnabled) {
       const el = marker.getElement();
       if (el) {
         const handler = (): void => {
-          el.classList.remove('wrc-lightning-pulse');
+          const svg = el.querySelector('svg');
+          if (svg) svg.classList.remove('wrc-lightning-pulse');
           el.removeEventListener('animationend', handler);
         };
         el.addEventListener('animationend', handler);
