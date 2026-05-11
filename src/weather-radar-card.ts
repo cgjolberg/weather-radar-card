@@ -329,6 +329,17 @@ export class WeatherRadarCard extends LitElement implements LovelaceCard {
     if ((window as unknown as { __weatherRadarCardEditorCount?: number }).__weatherRadarCardEditorCount) {
       this._editorOpen = true;
     }
+    // HA detaches and re-attaches the card when re-organising the DOM
+    // (entering edit mode, sections-grid layout changes). disconnectedCallback
+    // calls _teardown() which removes the Leaflet map; connectedCallback
+    // doesn't re-init on its own. Without nudging the lifecycle here, no
+    // property changes after re-attach so updated() never fires and the
+    // radar stays blank. requestUpdate forces an update cycle whose
+    // updated() handler already has the `if (!this._map && this._config)`
+    // → re-init path.
+    if (this._config && !this._map) {
+      this.requestUpdate();
+    }
   }
 
   public disconnectedCallback(): void {
