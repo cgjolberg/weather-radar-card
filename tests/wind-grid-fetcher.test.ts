@@ -261,6 +261,33 @@ describe('sampleWindGridBilinear', () => {
     const empty: WindGrid = { rows: 0, cols: 0, latMin: 0, lonMin: 0, step: 0.25, cells: [] };
     expect(sampleWindGridBilinear(empty, 0, 0)).toEqual({ u: 0, v: 0 });
   });
+
+  it('wraps lon outside [-180, 180] to the equivalent in-range cell (dateline crossing)', () => {
+    // The 8x8 fixture spans lon 10.125 to 12.125. Sampling at lon=370.2
+    // (which is 10.2 mod 360) should hit the same cell as lon=10.2.
+    // Used by particles in dateline-crossing viewports where Leaflet
+    // returns lon values past ±180.
+    const fixtureGrid = parseWcsTextGrid(FIXTURE_8x8);
+    const wrapped = sampleWindGridBilinear(fixtureGrid, 50.5, 370.2);
+    const direct = sampleWindGridBilinear(fixtureGrid, 50.5, 10.2);
+    expect(wrapped).toEqual(direct);
+  });
+
+  it('wraps negative lon past -180 to its [-180, 180] equivalent', () => {
+    // Fetcher expands to full-world for wrap-prone bboxes; sampler then
+    // gets called with lon=-200 (= 160 in wrapped coords). For a
+    // world-spanning grid the value at lon=160 should come back.
+    const worldGrid: WindGrid = {
+      rows: 1, cols: 4, latMin: 50, lonMin: -180, step: 90,
+      cells: [
+        // -180..-90, -90..0, 0..90, 90..180
+        [{ u: 1, v: 0 }, { u: 2, v: 0 }, { u: 3, v: 0 }, { u: 4, v: 0 }],
+      ],
+    };
+    // lon=-200 wraps to lon=160 → cell at index 3 (90..180 range).
+    const got = sampleWindGridNearest(worldGrid, 50.1, -200);
+    expect(got).toEqual({ u: 4, v: 0 });
+  });
 });
 
 // ── fetchWindGrid ──────────────────────────────────────────────────────────
@@ -368,11 +395,9 @@ describe('fetchWindGrid', () => {
     ).rejects.toThrow(/WCS returned exception.*Failed to read the coverage/);
   });
 
-  it('clamps bbox lat/lon to layer extent before sending the WCS subset', async () => {
-    // Leaflet's getBounds() at low zoom on a wide viewport readily produces
-    // values outside [-180, 180] / [-90, 90] (world wraparound). Pre-clamp
-    // protects the WCS request so it stays valid instead of triggering an
-    // "out of coverage extent" exception that we'd then have to recover from.
+  it('clamps lat to [-90, 90] before sending the WCS subset', async () => {
+    // Lat is just clamped — there's no geographically valid wraparound
+    // for latitude (the map clips at the poles).
     let capturedUrl = '';
     const fakeFetch = vi.fn(async (url: string) => {
       capturedUrl = url;
@@ -380,12 +405,47 @@ describe('fetchWindGrid', () => {
     }) as any;
 
     await fetchWindGrid({
-      south: -120, west: -250, north: 120, east: 250,
+      south: -120, west: 10, north: 120, east: 11,
       fetchImpl: fakeFetch,
     });
 
     expect(decodeURIComponent(capturedUrl)).toContain('subset=Lat(-90,90)');
+  });
+
+  it('expands the lon subset to the full world when the bbox wraps the dateline', async () => {
+    // Leaflet's getBounds() on a Pacific-centred low-zoom map readily
+    // returns west/east values past ±180 (e.g., west=-250). Earlier
+    // versions clamped to [-180, 180] which lost the wrapped strip
+    // entirely; now we fetch the whole world so the sampler can wrap
+    // lon during lookup.
+    let capturedUrl = '';
+    const fakeFetch = vi.fn(async (url: string) => {
+      capturedUrl = url;
+      return new Response(FIXTURE_8x8, { status: 200 });
+    }) as any;
+
+    await fetchWindGrid({
+      south: 30, west: -250, north: 60, east: -110,
+      fetchImpl: fakeFetch,
+    });
+
     expect(decodeURIComponent(capturedUrl)).toContain('subset=Long(-180,180)');
+  });
+
+  it('does NOT expand to the full world when the bbox stays inside [-180, 180]', async () => {
+    let capturedUrl = '';
+    const fakeFetch = vi.fn(async (url: string) => {
+      capturedUrl = url;
+      return new Response(FIXTURE_8x8, { status: 200 });
+    }) as any;
+
+    await fetchWindGrid({
+      south: 50, west: 10, north: 51, east: 11,
+      fetchImpl: fakeFetch,
+    });
+
+    expect(decodeURIComponent(capturedUrl)).toContain('subset=Long(10,11)');
+    expect(decodeURIComponent(capturedUrl)).not.toContain('Long(-180,180)');
   });
 
   it('returns the parsed grid on success', async () => {

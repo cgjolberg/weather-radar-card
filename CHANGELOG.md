@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Per-basemap streamline colour defaults + YAML overrides.** The streamline stroke colour was previously a single dark-vs-light branch — satellite shared the dark Carto map's near-white, which got lost on bright terrain. Satellite now has its own brighter pure-white default. Light basemaps also get a deeper default (`rgb(25,30,45)` was `rgb(50,55,75)`) for crisper contrast on OSM / Carto-light tiles. New YAML-only override keys `dwd_wind_flow_color_light`, `_dark`, and `_sat` accept any CSS colour string for theming or custom basemap palettes (editor doesn't expose them).
+
+### Fixed
+
+- **No dateline wrap on the wind layer** (one of the two beta2 known issues). Pacific-centred low-zoom views previously left the wrapped strip on one side of the antimeridian without wind data because `fetchWindGrid` clamped lon to `[-180, 180]`. Now the fetcher detects when the requested bbox extends past ±180° and expands to the full world; the samplers (`sampleWindGridNearest` / `sampleWindGridBilinear`) wrap the queried lon so coords like `-200` correctly resolve to the cell at lon `160`. Costs ~2 MB on the wire (the adaptive-scaling cap), but only triggers on viewports that actually wrap.
+
 ## [3.6.0-beta2] - 2026-05-10
 
 > Wind overlay rework: replaces the per-cell GetFeatureInfo burst with a single bulk WCS GetCoverage call (often **60–290× fewer requests per refresh**), makes the overlay available regardless of `data_source`, and adds substantial visual tuning. No new user-facing config; existing wind YAML keeps working unchanged.

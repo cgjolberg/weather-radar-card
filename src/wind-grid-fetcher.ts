@@ -165,17 +165,30 @@ function parseBand(body: string, header: string, rows: number, cols: number): nu
 // ── network ────────────────────────────────────────────────────────────────
 
 export async function fetchWindGrid(opts: FetchWindGridOptions): Promise<WindGrid> {
-  // Clamp to the layer's valid WGS84 extent. Leaflet's getBounds() at low
-  // zoom on a wide viewport readily returns lon/lat values OUTSIDE
-  // [-180, 180] / [-90, 90] (the map view wraps the world). DWD's WCS
-  // doesn't accept those — it returns an HTTP 200 with an XML exception
-  // body ("Failed to read the coverage"), the parser fails, and the
-  // overlay silently shows nothing. Clamping costs us the wrapped
-  // portion at the edge but keeps the visible map populated.
+  // Lat is just clamped to layer extent.
   const south = Math.max(-90, Math.min(90, opts.south));
   const north = Math.max(-90, Math.min(90, opts.north));
-  const west = Math.max(-180, Math.min(180, opts.west));
-  const east = Math.max(-180, Math.min(180, opts.east));
+
+  // Lon needs more care: Leaflet's getBounds() at low zoom on a wide
+  // viewport readily returns values OUTSIDE [-180, 180] when the map
+  // wraps the dateline (e.g., a Pacific-centred view at z3 returns
+  // west=-250, east=-110). DWD's WCS doesn't accept those — it
+  // returns HTTP 200 with an XML exception body, the parser fails,
+  // and the overlay silently shows nothing. If the requested bbox
+  // wraps, we expand to the full world; the sampler wraps lon during
+  // lookup so coordinates outside [-180, 180] still find the right
+  // cell. Costs ~2 MB on the wire (the adaptive-scaling cap), but
+  // wrap-prone viewports are already at low zoom where the user has
+  // a coarse grid anyway.
+  let west: number;
+  let east: number;
+  if (opts.west < -180 || opts.east > 180) {
+    west = -180;
+    east = 180;
+  } else {
+    west = opts.west;
+    east = opts.east;
+  }
 
   const params = new URLSearchParams({
     service: 'WCS',
@@ -233,6 +246,15 @@ export async function fetchWindGrid(opts: FetchWindGridOptions): Promise<WindGri
 // Pure: given a parsed WindGrid, look up or interpolate the U/V at a point.
 // Used by both overlays after the bulk fetch lands.
 
+/** Wrap a longitude to its [-180, 180] equivalent. Particles in dateline-
+ * crossing viewports get lon coords outside that range from Leaflet's
+ * containerPointToLatLng (e.g., -210 for the wrapped Pacific). The
+ * fetcher in those cases pulls the whole world, and this wrap lets the
+ * sampler find the cell at the equivalent in-range longitude. */
+function wrapLon(lon: number): number {
+  return ((lon + 180) % 360 + 360) % 360 - 180;
+}
+
 /** Snap a (lat, lon) to its WindGrid cell and return the U/V there.
  * Returns (0, 0) for points outside the grid bbox. */
 export function sampleWindGridNearest(
@@ -240,8 +262,9 @@ export function sampleWindGridNearest(
   lat: number,
   lon: number,
 ): { u: number; v: number } {
+  const wlon = wrapLon(lon);
   const r = Math.floor((lat - grid.latMin) / grid.step);
-  const c = Math.floor((lon - grid.lonMin) / grid.step);
+  const c = Math.floor((wlon - grid.lonMin) / grid.step);
   if (r < 0 || r >= grid.rows || c < 0 || c >= grid.cols) return { u: 0, v: 0 };
   return grid.cells[r][c];
 }
@@ -259,9 +282,10 @@ export function sampleWindGridBilinear(
   lon: number,
 ): { u: number; v: number } {
   if (grid.rows === 0 || grid.cols === 0) return { u: 0, v: 0 };
+  const wlon = wrapLon(lon);
   // Convert (lat, lon) to fractional row/col where (0, 0) is the SW cell centre.
   const fr = (lat - grid.latMin) / grid.step - 0.5;
-  const fc = (lon - grid.lonMin) / grid.step - 0.5;
+  const fc = (wlon - grid.lonMin) / grid.step - 0.5;
   // Clamp the index pair so points just inside the bbox edge still hit
   // the nearest cell rather than degenerating to (0, 0). Out-of-bbox is
   // a deliberate "no data".

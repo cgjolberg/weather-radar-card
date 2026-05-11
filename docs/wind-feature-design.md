@@ -232,7 +232,10 @@ When any of these triggers a parse failure, the overlay's `try/catch` resets to 
 Known issues from 3.6.0-beta2 we intend to address before stable:
 
 - **Wind streaks render above markers and popups.** The streak canvas is a child of `map.getContainer()` — outside Leaflet's `mapPane` stacking context — so its `z-index: 500` puts it above the panes for markers (600) and popups (700) regardless. Two earlier fix attempts (custom child pane and `overlayPane` reuse) both broke streamline POSITIONING — content offset by ~half the viewport and drifted relative to the map during scroll. Root cause: SVG and L.Canvas renderers in Leaflet position themselves per update via `setPosition(container, b.min)` against a padded layer-bounds rectangle; our naïve canvas-at-`(0,0)`-of-pane skipped that step. The fix is to subclass `L.Layer` and participate in the renderer-bounds + setPosition lifecycle (~50 lines, mirrors what `L.Canvas` does for shape rendering). Marker/popup *clicks* are unaffected — `pointer-events: none` lets them through; this is purely visual.
-- **No dateline wrap on the wind layer.** When a low-zoom view's bbox crosses the antimeridian (e.g., a Pacific-centred view that shows -200° to +160° lon), `fetchWindGrid` clamps to `[-180, 180]` and the wrapped strip on one edge renders without wind data. Splitting into two WCS requests at the dateline and stitching the results would fix it; deferred because it complicates the cache key and adds a synchronisation point. Affects the small fraction of users who centre their map at extreme longitudes.
+
+Resolved in beta3:
+
+- ~~**No dateline wrap on the wind layer.**~~ Pacific-centred low-zoom views used to leave the wrapped strip on one side of the antimeridian without wind data because `fetchWindGrid` clamped lon to `[-180, 180]`. Now the fetcher detects when the requested bbox extends past ±180° and expands to the full world (one ~2 MB request, bounded by adaptive scaling); the samplers wrap the queried lon so coords like `-200` correctly resolve to the cell at lon `160`. Considered a smarter "split into two requests + stitch" approach but rejected: small user fraction (Pacific maps at low zoom) didn't justify the cache-key complexity and synchronisation cost.
 
 Roadmap items in [todo.md](todo.md):
 
