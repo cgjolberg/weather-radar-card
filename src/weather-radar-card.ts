@@ -639,11 +639,28 @@ export class WeatherRadarCard extends LitElement implements LovelaceCard {
       });
     }
     if (cfg.dwd_wind_flow === true) {
-      // Use a darker stroke on light basemaps and a lighter one on dark.
-      const dark = this._currentMapStyle === 'dark' || this._currentMapStyle === 'satellite';
+      // Pick streamline colour from the active basemap. Satellite is split out
+      // from the plain dark Carto map: satellite imagery has more varied
+      // terrain (forests, snow, water) and benefits from a brighter stroke,
+      // while the Carto dark map has a uniform dark slate background and a
+      // softer near-white reads better there. YAML-only override keys
+      // (`dwd_wind_flow_color_{light,dark,sat}`) let users tune for
+      // theming or custom basemap palettes.
+      let defaultColor: string;
+      let customColor: string | undefined;
+      if (this._currentMapStyle === 'satellite') {
+        defaultColor = 'rgba(255,255,255,1)';
+        customColor = cfg.dwd_wind_flow_color_sat;
+      } else if (this._currentMapStyle === 'dark') {
+        defaultColor = 'rgba(220,225,235,1)';
+        customColor = cfg.dwd_wind_flow_color_dark;
+      } else {
+        defaultColor = 'rgba(25,30,45,1)';
+        customColor = cfg.dwd_wind_flow_color_light;
+      }
       this._windFlow = new WindFlowOverlay(this._map, {
         timeMs,
-        particleColor: dark ? 'rgba(220,225,235,0.55)' : 'rgba(50,55,75,0.5)',
+        particleColor: customColor ?? defaultColor,
       });
     }
   }

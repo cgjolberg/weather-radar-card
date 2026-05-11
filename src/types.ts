@@ -99,6 +99,16 @@ export interface WeatherRadarCardConfig extends LovelaceCardConfig {
   dwd_wind_size?: number;
   /** DWD-only: animated wind streamline overlay (à la DWD WarnWetter app). Stacks with dwd_wind. */
   dwd_wind_flow?: boolean;
+  /** YAML-only: stroke colour for streamline particles on light basemaps (osm / light / auto-light).
+   * Any CSS colour string. Default `rgba(25,30,45,1)`. Editor doesn't expose this. */
+  dwd_wind_flow_color_light?: string;
+  /** YAML-only: stroke colour for streamline particles on dark basemaps (dark / auto-dark).
+   * Any CSS colour string. Default `rgba(220,225,235,1)`. Editor doesn't expose this. */
+  dwd_wind_flow_color_dark?: string;
+  /** YAML-only: stroke colour for streamline particles on satellite basemaps. Defaults to bright
+   * near-white because satellite imagery has more varied terrain (forests, snow, water) than the
+   * dark Carto basemap and needs more contrast. Any CSS colour string. Default `rgba(255,255,255,1)`. */
+  dwd_wind_flow_color_sat?: string;
   show_snow?: boolean;
   show_progress_bar?: boolean;
   show_color_bar?: boolean;
