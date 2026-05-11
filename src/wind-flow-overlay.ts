@@ -22,6 +22,17 @@ const PARTICLE_CAP = 3500;
 // pixel speed varies with zoom. Without this compensation, low-zoom streaks
 // shrink to a few pixels and fail to show up against the basemap.
 const TARGET_STREAK_PX = 40;
+// Frame-rate throttle. requestAnimationFrame normally fires at the
+// display rate (typically 60 Hz); we cap actual draws to 15 Hz so per-
+// second CPU load drops ~4× and the trail buffer represents more
+// wall-clock time. Particle motion is scaled per actual elapsed-ms so
+// wall-clock head speed stays consistent with the 30 fps calibration
+// the per-frame `pxPerMpsPerFrame` constants were originally tuned
+// against — at 15 fps each frame represents twice the wall-clock motion,
+// so visible streak length doubles too.
+const TARGET_FPS = 15;
+const TARGET_FRAME_INTERVAL_MS = 1000 / TARGET_FPS;
+const MOTION_REFERENCE_FRAME_MS = 1000 / 30; // pxPerMpsPerFrame was calibrated for ~30 fps
 // Calibration wind for the streak-length math. Real winds vary; this is the
 // "typical" speed used to set particle lifetime. Faster winds make slightly
 // longer streaks, calmer winds shorter — that's a feature.
@@ -30,19 +41,25 @@ const TYPICAL_MPS_FOR_STREAK = 5;
 // extreme zooms; ceiling keeps trails from accumulating into a smudge
 // when particles barely move.
 const MIN_PARTICLE_LIFETIME_FRAMES = 30;
-// Cap on particle lifetime to prevent ink accumulation at low zoom.
-// 120 frames = 4 sec at 30 fps. Tighter cap = less time for any single
-// slow-moving particle to deposit ink at the same pixel and contribute
-// to canvas saturation.
+// Cap on particle lifetime in frames. After this many frames a particle
+// respawns at a new random position. With the explicit-trail rendering
+// model the lifetime mostly governs how often particles "rotate"
+// through the viewport — the trail itself is bounded by TRAIL_LENGTH.
 const MAX_PARTICLE_LIFETIME_FRAMES = 120;
-// Bounds: per-frame alpha decay. Floor avoids ghost trails that outlast
-// the wind they represent; ceiling avoids instant flash + disappear.
-// Floor on per-frame alpha decay. The new fade calibration (target
-// 0.5% alpha by lifetime end) naturally produces fade values around
-// 0.04-0.07 at the lifetime cap of 120 frames, so this floor only
-// catches degenerate cases where the calc would underflow.
-const MIN_FADE_PER_FRAME = 0.02;
-const MAX_FADE_PER_FRAME = 0.15;
+// Number of frames at the end of a particle's life over which its
+// trail's alpha decreases from full to zero. At 15 fps target this is
+// ~1 sec of soft fade-out. Implemented as a per-particle alpha
+// multiplier in the draw pass — no separate "dying" state machine.
+// The particle keeps moving during the fade.
+const FADE_OUT_FRAMES = 15;
+// Number of past positions to retain per particle in a ring buffer.
+// Defines the visible trail length: streak_px = TRAIL_LENGTH × velocity_px_per_frame
+// Each frame we redraw all trails from scratch (no canvas accumulation),
+// so when a particle dies its trail vanishes instantly — no fade tail.
+// 60 = 2 seconds of motion history at 30 fps; long enough for a visible
+// streamer at moderate-to-high zoom, short enough to keep per-frame
+// segment count manageable (60 buckets × particle_count stroke calls).
+const TRAIL_LENGTH = 60;
 // Zoom-based detail scaling. Applied to BOTH particle lifetime AND particle
 // count. Without it, low zooms looked over-busy in two ways: trails lingered
 // ~20 sec ("ghost ribbons") and the constant per-pixel particle density
@@ -99,8 +116,16 @@ export class WindFlowOverlay {
   // Particles are stored as a flat Float32Array — [x, y, age, x, y, age, …].
   // Cheaper to update than an Array of objects when we touch it 30×/sec.
   private _particles = new Float32Array(0);
+  // Per-particle ring buffer of past positions: [x_0, y_0, x_1, y_1, ...,
+  // x_(TL-1), y_(TL-1), <next particle>]. Indexed via _trailHeads which
+  // point to each particle's most recent slot. Used by the explicit-
+  // trail rendering model to draw streamers without canvas accumulation.
+  private _trails = new Float32Array(0);
+  private _trailHeads = new Uint8Array(0);
   private _particleCount = 0;
   private _animFrame = 0;
+  // Throttle bookkeeping: timestamp of the last actual draw frame.
+  private _lastDrawMs = 0;
   private _gen = 0;
   private _running = false;
   private _timeIso: string | null = null;
@@ -124,7 +149,6 @@ export class WindFlowOverlay {
   // Recomputed per refresh to keep visible streak length ~constant as the
   // pixel speed varies with zoom. See _restart for the derivation.
   private _particleLifetimeFrames = 60;
-  private _fadePerFrame = 0.04;
 
   constructor(map: L.Map, opts: WindFlowOverlayOptions = {}) {
     this._map = map;
@@ -230,6 +254,9 @@ export class WindFlowOverlay {
   private async _restart(): Promise<void> {
     this._stopLoop();
     const myGen = ++this._gen;
+    // Throttle bookkeeping reset — first frame after restart uses the
+    // target interval as the dt fallback (see _tick).
+    this._lastDrawMs = 0;
 
     const size = this._map.getSize();
     this._canvas.width = size.x;
@@ -254,17 +281,6 @@ export class WindFlowOverlay {
       MIN_PARTICLE_LIFETIME_FRAMES,
       Math.min(MAX_PARTICLE_LIFETIME_FRAMES, Math.round(scaled)),
     );
-    // Fade calibrated so a segment painted at frame 0 has decayed to
-    // ~0.5% alpha by the time the particle dies — visually
-    // indistinguishable from zero against any basemap, so the ribbon
-    // ends crisply rather than asymptotically lingering. The
-    // destination-out blend is mathematically multiplicative (alpha
-    // can never reach 0), but a 0.5% endpoint gives the closest
-    // perceptible-to-linear shape we can get without per-pixel age
-    // tracking. Math.pow(0.005, 1/N) is the per-frame alpha multiplier;
-    // (1 - that) is the destination-out alpha each tick applies.
-    const targetFade = 1 - Math.pow(0.005, 1 / this._particleLifetimeFrames);
-    this._fadePerFrame = Math.max(MIN_FADE_PER_FRAME, Math.min(MAX_FADE_PER_FRAME, targetFade));
 
     // Honour OS-level reduced-motion. The streamlines layer is purely
     // decorative — barbs/arrows still convey direction & speed — so we
@@ -350,11 +366,25 @@ export class WindFlowOverlay {
     const count = Math.min(PARTICLE_CAP, Math.round(w * h * density));
     this._particleCount = count;
     this._particles = new Float32Array(count * 3);
+    // Trail ring buffer per particle: TRAIL_LENGTH × (x, y) floats.
+    this._trails = new Float32Array(count * TRAIL_LENGTH * 2);
+    this._trailHeads = new Uint8Array(count);
     for (let p = 0; p < count; p++) {
-      this._particles[p * 3] = Math.random() * w;
-      this._particles[p * 3 + 1] = Math.random() * h;
+      const x = Math.random() * w;
+      const y = Math.random() * h;
+      this._particles[p * 3] = x;
+      this._particles[p * 3 + 1] = y;
       // Stagger initial ages so particles don't all respawn on the same frame.
       this._particles[p * 3 + 2] = Math.random() * this._particleLifetimeFrames;
+      // Initialise trail to the spawn point — all slots collapse to the
+      // current position, so the particle starts as a single point and
+      // its trail extends one segment per subsequent frame.
+      const base = p * TRAIL_LENGTH * 2;
+      for (let i = 0; i < TRAIL_LENGTH; i++) {
+        this._trails[base + i * 2] = x;
+        this._trails[base + i * 2 + 1] = y;
+      }
+      this._trailHeads[p] = 0;
     }
   }
 
@@ -364,68 +394,156 @@ export class WindFlowOverlay {
 
   private _tick = (): void => {
     if (!this._running) return;
+    // Throttle to TARGET_FPS. requestAnimationFrame still runs at the
+    // display rate; we just skip the work for frames that come too soon.
+    const now = performance.now();
+    const elapsedMs = now - this._lastDrawMs;
+    if (this._lastDrawMs > 0 && elapsedMs < TARGET_FRAME_INTERVAL_MS - 4) {
+      this._animFrame = requestAnimationFrame(this._tick);
+      return;
+    }
+    // First frame: prime _lastDrawMs so the next throttle check works,
+    // and use the target interval as the assumed dt for motion math.
+    const dtMs = this._lastDrawMs > 0 ? elapsedMs : TARGET_FRAME_INTERVAL_MS;
+    this._lastDrawMs = now;
+    // Scale per-frame motion so wall-clock head speed stays consistent
+    // regardless of the actual throttle rate or display refresh rate.
+    // pxPerMpsPerFrame was calibrated for ~30 fps; at our 15 fps target
+    // dtMs ≈ 67ms → motionScale ≈ 2.0 → particles move twice the per-
+    // frame distance, which combined with the half rate gives the same
+    // wall-clock speed AND a 2× longer visible streak per particle.
+    const motionScale = dtMs / MOTION_REFERENCE_FRAME_MS;
+    const stepPxPerMps = this._pxPerMpsPerFrame * motionScale;
+
     const ctx = this._ctx;
     const w = this._canvas.width;
     const h = this._canvas.height;
+    const count = this._particleCount;
 
-    // Decay existing trails — destination-out drops alpha regardless of colour,
-    // so this works on any basemap.
-    ctx.globalCompositeOperation = 'destination-out';
-    ctx.fillStyle = `rgba(0,0,0,${this._fadePerFrame})`;
-    ctx.fillRect(0, 0, w, h);
+    // Step 1: clear the entire canvas. No destination-out fade — the
+    // explicit per-particle trail buffer means we draw the full visible
+    // streak from scratch each frame. When a particle dies, its trail
+    // vanishes instantly because we no longer redraw those pixels.
+    ctx.clearRect(0, 0, w, h);
 
-    ctx.globalCompositeOperation = 'source-over';
-    // Attenuate per-stroke alpha at low zoom. Even with the detail
-    // multiplier thinning particle COUNT, slow-moving particles deposit
-    // ink at almost the same pixel for many frames in a row — at full
-    // alpha the canvas saturates into a band along the wind direction.
-    // Cube-root scaling pulls only the very low end down without
-    // dimming the mid range too much (z3: ~0.45, z6: ~0.80,
-    // z12+: 1.0). Keeps user-configured stroke colour intact at high
-    // zoom where there's no compounding.
-    ctx.globalAlpha = Math.min(1, Math.pow(this._zoomDetailMultiplier(), 1 / 3));
-    ctx.strokeStyle = this._color;
-    // Line width compensates for the lower density at low zoom — fewer
-    // particles each rendered thicker so the wind field stays readable.
-    // Linear ramp: 3 px at z3 → 1 px at z7+ (z7 was identified as the
-    // visual reference point). At native pixels.
-    const z = this._map.getZoom();
-    ctx.lineWidth = Math.max(1, Math.min(3, 3 - (z - 3) * 0.5));
-    ctx.beginPath();
-
-    for (let p = 0; p < this._particleCount; p++) {
+    // Step 2: advance every particle. Single state — no separate dying
+    // flag. When age reaches lifetime + FADE_OUT_FRAMES the particle
+    // respawns at a random position with a wiped trail. The fade-out
+    // happens entirely in the draw pass via a per-particle alpha
+    // multiplier; here we just keep moving and ageing.
+    for (let p = 0; p < count; p++) {
       const idx = p * 3;
+      const trailBase = p * TRAIL_LENGTH * 2;
       const x = this._particles[idx];
       const y = this._particles[idx + 1];
-      let age = this._particles[idx + 2];
+      const age = this._particles[idx + 2];
+
+      // Respawn once the particle has fully aged through its lifetime
+      // AND the fade-out window. (Off-canvas particles also respawn
+      // immediately — they've stopped contributing visual ink.)
+      const offCanvas = x < 0 || x > w || y < 0 || y > h;
+      if (age >= this._particleLifetimeFrames + FADE_OUT_FRAMES || offCanvas) {
+        const rx = Math.random() * w;
+        const ry = Math.random() * h;
+        this._particles[idx] = rx;
+        this._particles[idx + 1] = ry;
+        this._particles[idx + 2] = 0;
+        for (let i = 0; i < TRAIL_LENGTH; i++) {
+          this._trails[trailBase + i * 2] = rx;
+          this._trails[trailBase + i * 2 + 1] = ry;
+        }
+        this._trailHeads[p] = 0;
+        continue;
+      }
 
       const ll = this._map.containerPointToLatLng(L.point(x, y));
       const wind = this._interpolate(ll.lat, ll.lng);
+      const nx = x + wind.u * stepPxPerMps;
+      const ny = y - wind.v * stepPxPerMps; // pixel y goes down; v is northward
 
-      const nx = x + wind.u * this._pxPerMpsPerFrame;
-      const ny = y - wind.v * this._pxPerMpsPerFrame; // pixel y goes down; v is northward
+      this._particles[idx] = nx;
+      this._particles[idx + 1] = ny;
+      this._particles[idx + 2] = age + 1;
+      const newHead = (this._trailHeads[p] + 1) % TRAIL_LENGTH;
+      this._trails[trailBase + newHead * 2] = nx;
+      this._trails[trailBase + newHead * 2 + 1] = ny;
+      this._trailHeads[p] = newHead;
+    }
 
-      if (Math.abs(wind.u) + Math.abs(wind.v) > 0.05) {
-        ctx.moveTo(x, y);
-        ctx.lineTo(nx, ny);
+    // Step 3: draw all trails. For each particle, compute a per-particle
+    // life-fade multiplier:
+    //   - 1.0 while age < lifetime
+    //   - smoothly drops to 0 over the FADE_OUT_FRAMES tail of life
+    //   - eased with cubic so the transition from "fully alive" to
+    //     "starting to fade" is imperceptible (early fade frames stay
+    //     near full alpha, then accelerate to 0 at the end). This
+    //     avoids the perceptual "flash" a linear fade can produce
+    //     where the early fade is steep enough to look like a step.
+    //
+    // Particles split into two groups by their fade multiplier:
+    //   - fully alive (multiplier == 1): batched per segment-age (cheap)
+    //   - fading (multiplier < 1): per-segment per-particle (~10k
+    //     strokes/frame at typical density, fine at 15fps)
+    ctx.strokeStyle = this._color;
+    const z = this._map.getZoom();
+    // Line width compensates for lower density at low zoom — fewer
+    // particles, each rendered thicker. Linear ramp 3px (z3) → 1px (z7+).
+    ctx.lineWidth = Math.max(1, Math.min(3, 3 - (z - 3) * 0.5));
+    // Per-stroke alpha attenuated at low zoom to avoid over-painting
+    // the basemap with too many concurrent streaks (cube-root curve).
+    const baseAlpha = Math.min(1, Math.pow(this._zoomDetailMultiplier(), 1 / 3));
+    const lifetime = this._particleLifetimeFrames;
+
+    // Pass A: fully alive particles batched by segment age.
+    for (let segAge = 0; segAge < TRAIL_LENGTH - 1; segAge++) {
+      const ageAlpha = (TRAIL_LENGTH - 1 - segAge) / (TRAIL_LENGTH - 1);
+      ctx.globalAlpha = ageAlpha * baseAlpha;
+      ctx.beginPath();
+      for (let p = 0; p < count; p++) {
+        if (this._particles[p * 3 + 2] >= lifetime) continue; // fading — separate pass
+        const head = this._trailHeads[p];
+        const i0 = (head - segAge + TRAIL_LENGTH) % TRAIL_LENGTH;
+        const i1 = (head - segAge - 1 + TRAIL_LENGTH) % TRAIL_LENGTH;
+        const trailBase = p * TRAIL_LENGTH * 2;
+        const x0 = this._trails[trailBase + i0 * 2];
+        const y0 = this._trails[trailBase + i0 * 2 + 1];
+        const x1 = this._trails[trailBase + i1 * 2];
+        const y1 = this._trails[trailBase + i1 * 2 + 1];
+        if (x0 === x1 && y0 === y1) continue;
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
       }
+      ctx.stroke();
+    }
 
-      age++;
-      if (age > this._particleLifetimeFrames || nx < 0 || nx > w || ny < 0 || ny > h) {
-        this._particles[idx] = Math.random() * w;
-        this._particles[idx + 1] = Math.random() * h;
-        this._particles[idx + 2] = 0;
-      } else {
-        this._particles[idx] = nx;
-        this._particles[idx + 1] = ny;
-        this._particles[idx + 2] = age;
+    // Pass B: fading particles — each at their own life-fade alpha.
+    for (let p = 0; p < count; p++) {
+      const age = this._particles[p * 3 + 2];
+      if (age < lifetime) continue;
+      // Cubic ease-in: t in [0, 1], lifeFade = 1 - t^3. Stays near 1
+      // through most of the fade window, drops sharply at the end.
+      const t = Math.min(1, (age - lifetime) / FADE_OUT_FRAMES);
+      const lifeFade = 1 - t * t * t;
+      if (lifeFade <= 0) continue;
+      const head = this._trailHeads[p];
+      const trailBase = p * TRAIL_LENGTH * 2;
+      for (let segAge = 0; segAge < TRAIL_LENGTH - 1; segAge++) {
+        const i0 = (head - segAge + TRAIL_LENGTH) % TRAIL_LENGTH;
+        const i1 = (head - segAge - 1 + TRAIL_LENGTH) % TRAIL_LENGTH;
+        const x0 = this._trails[trailBase + i0 * 2];
+        const y0 = this._trails[trailBase + i0 * 2 + 1];
+        const x1 = this._trails[trailBase + i1 * 2];
+        const y1 = this._trails[trailBase + i1 * 2 + 1];
+        if (x0 === x1 && y0 === y1) continue;
+        const ageAlpha = (TRAIL_LENGTH - 1 - segAge) / (TRAIL_LENGTH - 1);
+        ctx.globalAlpha = ageAlpha * lifeFade * baseAlpha;
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.stroke();
       }
     }
 
-    ctx.stroke();
-    // Reset globalAlpha so it doesn't carry over into next frame's fade
-    // fillRect (which uses fillStyle's alpha as the destination-out
-    // amount; multiplied by a non-1 globalAlpha would slow fade).
     ctx.globalAlpha = 1;
     this._animFrame = requestAnimationFrame(this._tick);
   };
