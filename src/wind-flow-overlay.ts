@@ -404,7 +404,12 @@ export class WindFlowOverlay {
     }
     // First frame: prime _lastDrawMs so the next throttle check works,
     // and use the target interval as the assumed dt for motion math.
-    const dtMs = this._lastDrawMs > 0 ? elapsedMs : TARGET_FRAME_INTERVAL_MS;
+    // Cap dtMs at 2× target so a long gap between frames (e.g., the tab
+    // was hidden — browsers throttle raf to ~1 Hz on background tabs)
+    // doesn't translate into a giant per-frame motion jump that would
+    // produce very long line-segments on the next draw.
+    const rawDt = this._lastDrawMs > 0 ? elapsedMs : TARGET_FRAME_INTERVAL_MS;
+    const dtMs = Math.min(rawDt, TARGET_FRAME_INTERVAL_MS * 2);
     this._lastDrawMs = now;
     // Scale per-frame motion so wall-clock head speed stays consistent
     // regardless of the actual throttle rate or display refresh rate.
