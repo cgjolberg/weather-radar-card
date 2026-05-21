@@ -1153,6 +1153,15 @@ export class RadarPlayer {
             // A new older frame was prepended; shift _currentSlot to keep the
             // same frame (newest) showing — the running timer continues unaffected.
             this._currentSlot++;
+            // _prev1Slot is also an index into _loadedSlots, and that array
+            // just grew at the front, so the previously shown slot is now
+            // one step up. Without this shift the next _showSlot tries to
+            // fade out the wrong layer (the freshly loaded one, already at
+            // 0) and the previously visible frame stays orphaned at active
+            // opacity until the loop wraps to slot 0, where snap mode
+            // resets every other layer. That's the ghost trail of stacked
+            // frames visible while later frames are still loading.
+            if (this._prev1Slot >= 0) this._prev1Slot++;
           } else {
             // Two frames ready: start the loop at the newest slot.
             this._startLoop(this._loadedSlots.length - 1);
