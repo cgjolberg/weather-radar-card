@@ -57,13 +57,28 @@ interface Coords extends L.Point {
   z: number;
 }
 
+// Each in-flight tile fetch gets an AbortController so a tile that
+// Leaflet decides to unload (pan-out-of-view, zoom-change, layer remove)
+// can have its underlying HTTP request cancelled rather than letting the
+// browser download bytes we'll immediately discard. The controller is
+// stored on the tile element itself (`__wrcAbort`) so the tileunload
+// handler can find it without a separate map. On success/failure the
+// pointer is cleared so we don't try to abort a settled fetch.
+//
+// On a busy mobile connection this cuts wire bandwidth substantially:
+// a low-zoom continental pan can trigger dozens of tile fetches that
+// would otherwise complete after the user has already moved past them.
+interface TileWithAbort extends HTMLImageElement {
+  __wrcAbort?: AbortController | null;
+}
+
 function createFetchTile(
   this: FetchTileLayer | FetchWmsTileLayer,
   coords: Coords,
   done: L.DoneCallback,
 ): HTMLElement {
   const layer = this;
-  const tile = document.createElement('img');
+  const tile = document.createElement('img') as TileWithAbort;
   tile.setAttribute('role', 'presentation');
 
   const url = layer.getTileUrl(coords);
@@ -80,6 +95,7 @@ function createFetchTile(
     tile.src = TRANSPARENT;
     layer._tilePending--;
     layer._tileFailed++;
+    tile.__wrcAbort = null;
     done(undefined, tile);
   };
 
@@ -90,7 +106,16 @@ function createFetchTile(
     }
     limiter?.record(url);
 
-    fetch(url, { referrer: window.location.href, referrerPolicy: 'no-referrer-when-downgrade' })
+    // Fresh controller for each attempt — retries get their own so
+    // aborting one in-flight retry doesn't poison the next.
+    const ctrl = new AbortController();
+    tile.__wrcAbort = ctrl;
+
+    fetch(url, {
+      referrer: window.location.href,
+      referrerPolicy: 'no-referrer-when-downgrade',
+      signal: ctrl.signal,
+    })
       .then((r) => {
         if (r.status === 404) { const e: any = new Error('404'); e.status = 404; throw e; }
         if (r.status === 429) { const e: any = new Error('429'); e.status = 429; throw e; }
@@ -108,9 +133,19 @@ function createFetchTile(
         limiter?.recordSuccess(url);
         layer._tilePending--;
         layer._tileLoaded++;
+        tile.__wrcAbort = null;
         done(undefined, tile);
       })
       .catch((err: any) => {
+        // Deliberately-cancelled fetch (tile unloaded / layer removed).
+        // Decrement pending so the loading-spinner / segment counter
+        // stays accurate, but don't count as a failure and don't retry.
+        // Don't call done() — Leaflet has already moved on from this tile.
+        if (err.name === 'AbortError') {
+          layer._tilePending--;
+          tile.__wrcAbort = null;
+          return;
+        }
         if (err.status === 404) {
           fail();
         } else if (err.status === 429 || (limiter && !err.status)) {
@@ -130,6 +165,31 @@ function createFetchTile(
 
   tryFetch();
   return tile;
+}
+
+// Hook Leaflet's tileunload event so we abort the underlying fetch when
+// a tile leaves the DOM. Also hook the layer's `remove` event for the
+// bulk teardown case (layer removed from the map, card teardown).
+function wireAbortLifecycle(layer: FetchTileLayer | FetchWmsTileLayer): void {
+  layer.on('tileunload', (e: L.TileEvent) => {
+    const tile = e.tile as TileWithAbort;
+    tile.__wrcAbort?.abort();
+    tile.__wrcAbort = null;
+  });
+  layer.on('remove', () => {
+    // Walk Leaflet's internal _tiles map for any still-pending fetches.
+    // tileunload generally fires for each before remove, but the
+    // contract is fuzzy under fast tear-downs; this is belt-and-braces.
+    const tiles = (layer as any)._tiles as Record<string, { el: HTMLElement }> | undefined;
+    if (!tiles) return;
+    for (const key in tiles) {
+      const tile = tiles[key]?.el as TileWithAbort | undefined;
+      if (tile?.__wrcAbort) {
+        tile.__wrcAbort.abort();
+        tile.__wrcAbort = null;
+      }
+    }
+  });
 }
 
 // _updateOpacity body shared by FetchTileLayer and FetchWmsTileLayer when
@@ -166,6 +226,7 @@ export class FetchTileLayer extends L.TileLayer {
     this._tileFailed = 0;
     this._tileLoaded = 0;
     (L.TileLayer.prototype as any).initialize.call(this, url, options);
+    wireAbortLifecycle(this);
   }
 
   createTile(coords: L.Coords, done: L.DoneCallback): HTMLElement {
@@ -201,6 +262,7 @@ export class FetchWmsTileLayer extends L.TileLayer.WMS {
     const { rateLimiter, on429, animationOwnsOpacity, pixelFilter, ...wmsOptions } = options;
     (L.TileLayer.WMS.prototype as any).initialize.call(this, url, wmsOptions);
     Object.assign(this.options, { rateLimiter, on429, animationOwnsOpacity, pixelFilter });
+    wireAbortLifecycle(this);
   }
 
   createTile(coords: L.Coords, done: L.DoneCallback): HTMLElement {
