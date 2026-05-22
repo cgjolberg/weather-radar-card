@@ -222,6 +222,12 @@ export class RadarPlayer {
   private _frameStatuses: FrameStatus[] = [];
   private _radarReady = false;
   private _frameGeneration = 0;
+  // Abort the RainViewer JSON metadata fetch (called from _fetchPaths)
+  // when a new generation supersedes the previous one or the player is
+  // torn down. The generation check already discards stale responses;
+  // aborting just stops the wire bandwidth too. Only used by the
+  // RainViewer path; DWD / NOAA derive frame timestamps locally.
+  private _pathsAbortCtrl: AbortController | null = null;
   private _configFrameCount = 5;
   private _doRadarUpdate = false;
 
@@ -356,6 +362,8 @@ export class RadarPlayer {
   clear(): void {
     this._stopLoop();
     this._clearLayers();
+    this._pathsAbortCtrl?.abort();
+    this._pathsAbortCtrl = null;
     this._map?.off('zoomend', this._onZoomEnd);
     if (this._rateLimitTimer) { clearTimeout(this._rateLimitTimer); this._rateLimitTimer = null; }
     this._worker?.terminate();
@@ -933,8 +941,23 @@ export class RadarPlayer {
       }
       return frames;
     }
-    const res = await fetch('https://api.rainviewer.com/public/weather-maps.json');
-    const data = await res.json();
+    this._pathsAbortCtrl?.abort();
+    const ctrl = new AbortController();
+    this._pathsAbortCtrl = ctrl;
+    let data: { host?: string; radar?: { past?: unknown[] } };
+    try {
+      const res = await fetch('https://api.rainviewer.com/public/weather-maps.json', {
+        signal: ctrl.signal,
+      });
+      data = await res.json();
+    } catch (err) {
+      // Aborted by a fresh _fetchPaths or by teardown — the caller's
+      // generation check will discard the empty result we return below.
+      if ((err as Error)?.name === 'AbortError') return [];
+      throw err;
+    } finally {
+      if (this._pathsAbortCtrl === ctrl) this._pathsAbortCtrl = null;
+    }
     const host: string = data.host ?? 'https://tilecache.rainviewer.com';
     const past: RadarFrame[] = (data?.radar?.past ?? []).map((f: any) => ({
       time: f.time, path: f.path, host,

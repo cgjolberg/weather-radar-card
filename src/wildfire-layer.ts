@@ -87,6 +87,10 @@ export class WildfireLayer {
   // resolve point doesn't match, the fetch is stale (config changed mid-flight,
   // teardown happened, etc.) and we discard the result.
   private _gen = 0;
+  // Abort the in-flight fetches (NIFC + InciWeb) when a new fetch starts
+  // or the layer tears down, so the browser doesn't keep downloading
+  // payloads we've already decided to discard via the gen check.
+  private _abortCtrl: AbortController | null = null;
   private _zoomHandler: (() => void) | null = null;
 
   constructor(
@@ -110,6 +114,8 @@ export class WildfireLayer {
 
   clear(): void {
     this._gen++;   // invalidate any in-flight fetches
+    this._abortCtrl?.abort();   // cancel the HTTP requests too, not just the response handling
+    this._abortCtrl = null;
     if (this._timer) { clearTimeout(this._timer); this._timer = null; }
     if (this._zoomHandler) {
       this._map.off('zoomend', this._zoomHandler);
@@ -161,13 +167,20 @@ export class WildfireLayer {
 
   private async _fetch(): Promise<void> {
     const myGen = ++this._gen;
+    // Abort any previous in-flight fetches so their bytes stop hitting
+    // the wire — the gen check below would discard the response anyway,
+    // but on mobile we'd rather not pay the bandwidth.
+    this._abortCtrl?.abort();
+    const ctrl = new AbortController();
+    this._abortCtrl = ctrl;
     // Fetch WFIGS perimeters and the InciWeb incident index in parallel —
     // they're independent and we want the latest of both before re-rendering.
     const [features, inciwebSlugs] = await Promise.all([
-      this._fetchWfigs(),
-      this._fetchInciwebSlugs(),
+      this._fetchWfigs(ctrl.signal),
+      this._fetchInciwebSlugs(ctrl.signal),
     ]);
     if (myGen !== this._gen) return;   // stale — abandon
+    if (this._abortCtrl === ctrl) this._abortCtrl = null;
 
     this._features = this._filter(features);
     if (inciwebSlugs) {
@@ -178,13 +191,16 @@ export class WildfireLayer {
     this._scheduleNext();
   }
 
-  private async _fetchWfigs(): Promise<GeoJSON.Feature[]> {
+  private async _fetchWfigs(signal: AbortSignal): Promise<GeoJSON.Feature[]> {
     try {
-      const res = await fetch(NIFC_URL);
+      const res = await fetch(NIFC_URL, { signal });
       if (!res.ok) throw new Error(`NIFC fetch ${res.status}`);
       const data = await res.json() as GeoJSON.FeatureCollection;
       return (data?.features ?? []).filter((f): f is GeoJSON.Feature => !!f?.geometry);
     } catch (err) {
+      // Deliberate cancellation (teardown / superseded by a fresh fetch).
+      // Not a real failure — caller's gen check will discard the result anyway.
+      if ((err as Error)?.name === 'AbortError') return [];
       // Transient — NIFC's ArcGIS endpoint occasionally rate-limits or
       // returns 503. Next scheduled fetch will retry.
       console.warn('Wildfire layer: WFIGS fetch failed', err);
@@ -195,9 +211,9 @@ export class WildfireLayer {
   // Fetch InciWeb's RSS and extract the slug (path segment) from every
   // incident link. Returns null on failure so the caller can leave the
   // existing slug set in place (avoid blowing it away on a transient error).
-  private async _fetchInciwebSlugs(): Promise<Set<string> | null> {
+  private async _fetchInciwebSlugs(signal: AbortSignal): Promise<Set<string> | null> {
     try {
-      const res = await fetch(INCIWEB_RSS_URL);
+      const res = await fetch(INCIWEB_RSS_URL, { signal });
       if (!res.ok) throw new Error(`InciWeb RSS fetch ${res.status}`);
       const text = await res.text();
       const doc = new DOMParser().parseFromString(text, 'application/xml');
@@ -210,6 +226,9 @@ export class WildfireLayer {
       });
       return slugs;
     } catch (err) {
+      // Deliberate cancellation (teardown / superseded by a fresh fetch).
+      // Not a real failure — return null so the caller keeps the prior slug set.
+      if ((err as Error)?.name === 'AbortError') return null;
       // CORS, network, or parse failure. Leave the previous set intact and
       // fall back to "show link" behaviour for new fires until next refresh.
       console.warn('Wildfire layer: InciWeb RSS fetch failed', err);

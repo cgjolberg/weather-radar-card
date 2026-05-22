@@ -89,6 +89,13 @@ export class NwsAlertsLayer {
   // Used by resume() to decide whether to refetch immediately.
   private _pausedAt: number | null = null;
   private _gen = 0;
+  // Cancellation for the alerts-list fetch (set per _fetch call) and the
+  // per-zone fetches (single shared controller — they all become stale
+  // together when the layer tears down or the alert list is replaced).
+  // The gen check already discards stale responses; aborting just stops
+  // the wire bandwidth too.
+  private _abortCtrl: AbortController | null = null;
+  private _zoneAbortCtrl: AbortController | null = null;
 
   constructor(
     map: L.Map,
@@ -106,6 +113,10 @@ export class NwsAlertsLayer {
 
   clear(): void {
     this._gen++;   // invalidates any in-flight WFIGS / zone fetches
+    this._abortCtrl?.abort();
+    this._abortCtrl = null;
+    this._zoneAbortCtrl?.abort();
+    this._zoneAbortCtrl = null;
     if (this._timer) { clearTimeout(this._timer); this._timer = null; }
     if (this._polygonLayer) { this._map.removeLayer(this._polygonLayer); this._polygonLayer = null; }
     this._features = [];
@@ -151,13 +162,27 @@ export class NwsAlertsLayer {
 
   private async _fetch(): Promise<void> {
     const myGen = ++this._gen;
+    // Abort any previous alerts-list fetch and the in-flight zone fetches.
+    // The new alerts list will trigger a fresh _resolveZones pass on the
+    // affected-zones from the new payload; zones for alerts that dropped
+    // off the list are no longer interesting.
+    this._abortCtrl?.abort();
+    this._zoneAbortCtrl?.abort();
+    const ctrl = new AbortController();
+    this._abortCtrl = ctrl;
     let features: GeoJSON.Feature[] = [];
     try {
-      const res = await fetch(NWS_ALERTS_URL, { headers: { Accept: 'application/geo+json' } });
+      const res = await fetch(NWS_ALERTS_URL, {
+        headers: { Accept: 'application/geo+json' },
+        signal: ctrl.signal,
+      });
       if (!res.ok) throw new Error(`NWS fetch ${res.status}`);
       const data = await res.json() as GeoJSON.FeatureCollection;
       features = data?.features ?? [];
     } catch (err) {
+      // Deliberate cancellation (teardown / superseded). Drop silently;
+      // the new fetch is already in flight or the layer is going away.
+      if ((err as Error)?.name === 'AbortError') return;
       // Transient: NWS occasionally returns 5xx during outages. Retry on
       // the next scheduled interval; don't blow away currently-displayed
       // alerts (this._features is left intact below if features stays []).
@@ -166,6 +191,7 @@ export class NwsAlertsLayer {
       return;
     }
     if (myGen !== this._gen) return;   // stale
+    if (this._abortCtrl === ctrl) this._abortCtrl = null;
 
     // Filter, then sort lexicographically by (severity, urgency,
     // certainty) so the most actionable alerts paint last and end up
@@ -200,13 +226,21 @@ export class NwsAlertsLayer {
     }
     if (needed.size === 0) return;
 
+    // Shared controller for this batch — a fresh _fetch() that
+    // supersedes the current alerts list aborts the entire in-flight
+    // zone batch in one go (it's the new feature list that decides
+    // which zones are still relevant).
+    const ctrl = new AbortController();
+    this._zoneAbortCtrl = ctrl;
+
     // _fetchZone self-registers in _zoneFetches as its first action so the
     // entry exists before any sync return path (e.g. localStorage hit) can
     // hit the matching `finally { delete }`. We just collect the promises
     // here for the Promise.all join.
-    const promises = Array.from(needed, (url) => this._fetchZone(url));
+    const promises = Array.from(needed, (url) => this._fetchZone(url, ctrl.signal));
     await Promise.all(promises);
     if (myGen !== this._gen) return;   // stale (cleared / reconfigured during the fetch)
+    if (this._zoneAbortCtrl === ctrl) this._zoneAbortCtrl = null;
 
     // Skip-if-unchanged still applies — only the features whose zones
     // actually arrived will see their decision strings flip, so this is
@@ -214,7 +248,7 @@ export class NwsAlertsLayer {
     this._render({ skipIfDecisionsUnchanged: true });
   }
 
-  private async _fetchZone(url: string): Promise<void> {
+  private async _fetchZone(url: string, signal: AbortSignal): Promise<void> {
     // Self-register so concurrent callers dedupe. Registration must happen
     // BEFORE the localStorage early-return path so the matching `finally
     // { delete }` always pairs with a real entry, never a stale one. If
@@ -238,6 +272,7 @@ export class NwsAlertsLayer {
       const myGen = this._gen;
       const res = await fetch(url, {
         headers: { Accept: 'application/geo+json' },
+        signal,
       });
       if (!res.ok) throw new Error(`zone fetch ${res.status}`);
       const data = await res.json();
@@ -250,6 +285,9 @@ export class NwsAlertsLayer {
         writeZoneToLocalStorage(url, geom);
       }
     } catch (err) {
+      // Deliberate cancellation — alert list was replaced; new
+      // _resolveZones pass will refetch any still-relevant zones.
+      if ((err as Error)?.name === 'AbortError') return;
       // Per-zone failures are common (404s on retired zones, transient
       // network blips). Log once and move on; the alert's other zones
       // may still resolve and render.
