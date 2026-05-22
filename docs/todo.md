@@ -246,6 +246,54 @@ preserving pinch-to-zoom, so mobile users can scroll past the card.
   external PR, guaranteed to render. We've held off on that to keep the
   card name canonical; revisit if the issue gets attention.
 
+- **TypeScript module augmentation for Leaflet** — code-health pass, target 3.8.
+  About 25 source files carry `/* eslint-disable @typescript-eslint/no-explicit-any */`
+  to access Leaflet APIs we legitimately need (`getContainer()`,
+  `_tilePending`, project-internal extensions like `_wrcCfg`). The
+  principled fix is a `declare module 'leaflet'` augmentation block
+  declaring our extension fields and exposing the private methods we
+  rely on as typed. Replacing the `any` casts with proper types
+  catches typos at compile time and removes a real source of latent
+  bugs without behavioural change.
+
+  Identified by Gemini code review (issue #1). Estimated ~1-2 days of
+  mechanical work; no user-facing impact, so deferred to a dedicated
+  code-health release rather than slipped into a feature PR.
+
+- **Web Worker for the DWD pixel filter** — perf, conditional on profiling.
+  `applyPixelFilter` in `src/fetch-tile-layer.ts` does a pixel-pass
+  scan on the main thread to strip DWD's baked-in coverage mask.
+  Each tile is ~65K pixels × ~13 ops = ~7-13ms per refresh across a
+  typical 10-20 tile viewport. That's well under a frame budget and
+  only runs at 5-minute refresh ticks (not per animation frame), so
+  the absolute cost is small.
+
+  Moving to OffscreenCanvas + a Worker would cleanly remove it from
+  the main thread, BUT the inter-thread transfer of pixel buffers
+  (~256 KB per tile) likely erases the win for this small payload.
+  **Don't act until profiling shows a real spike** — if
+  `performance.measure` flags >50ms here on representative hardware,
+  THEN consider the Worker. The `wind-flow-overlay.ts` per-frame
+  canvas work at 15 fps is a bigger perf fish for the same effort.
+
+  Identified by Gemini code review (issue #2).
+
+- **WindGridFetcher cancellation via consumer reference-counting** —
+  pair with the 3.7 layer-control work.
+  The other four fetch sites (`fetch-tile-layer.ts`, `wildfire-layer.ts`,
+  `nws-alerts-layer.ts`, `radar-player.ts`) gained `AbortController` in
+  3.6.2 to stop superseded fetches from completing on the wire.
+  `WindGridFetcher` was intentionally skipped because it
+  request-coalesces across multiple callers (both wind-icon and
+  wind-flow overlays share one in-flight fetch). Aborting it correctly
+  needs reference-counting: only abort when the LAST consumer has lost
+  interest, not when any one of them does. The 60-second cache TTL
+  provides similar bandwidth conservation in practice.
+
+  When the layer-control panel (3.7) adds explicit per-card cancellation
+  semantics — the user toggles wind off on a card mid-fetch — this
+  becomes a real requirement. Until then, the cache TTL is fine.
+
 ### Shipped
 
 - Clickable / draggable timeline ✅
