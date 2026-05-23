@@ -41,16 +41,15 @@ order:
 ## Authority and limits
 
 **Agents open pull requests. Humans review and merge.** No
-self-merging, no direct commits to `master` or `main`, no merges via
-API.
+self-merging, no direct commits to `main`, no merges via API.
 
 This is non-negotiable, even for trivial changes. The "trivial
 change that breaks production" failure mode is real, and the human
 review step is the cheapest insurance against it.
 
-`master` is the canonical working branch; `main` is mirrored from
-`master` by [`sync-master.yml`](.github/workflows/sync-master.yml).
-PRs against either are fine; reviewer will retarget if needed.
+`main` is the canonical and only long-lived branch. (The repo had a
+`master` branch up to mid-2026 from its pre-transfer history; it has
+been removed.) Open all PRs against `main`.
 
 ### Hard no's — never do these without explicit user approval in the same session
 
@@ -121,7 +120,7 @@ trying things — it's a signal that the diagnosis was wrong.
 
 ### Branching
 
-New work on a new branch off `master`. Naming:
+New work on a new branch off `main`. Naming:
 
 - `issue-<number>-<short-description>` when addressing a tracked
   issue (e.g. `issue-110-markercluster-resize`).
@@ -165,7 +164,7 @@ without the flag npm refuses to install. CI uses the same flag
 
 ### Adding tests
 
-Every behavioral change must come with a test that fails on `master`
+Every behavioral change must come with a test that fails on `main`
 and passes with the change. Bug fixes get a regression test that
 reproduces the original symptom. New features get tests covering
 the golden path and the obvious edge cases (empty input, missing
@@ -217,7 +216,7 @@ history; rewriting that history erases context.
 When the work is ready:
 
 1. Push the branch.
-2. Open the PR against `master`. The repo's PR template at
+2. Open the PR against `main`. The repo's PR template at
    [`.github/PULL_REQUEST_TEMPLATE.md`](.github/PULL_REQUEST_TEMPLATE.md)
    auto-populates the body. Fill in every section; never remove
    one. Mark sections "n/a" with a one-line reason when they
@@ -370,7 +369,7 @@ docs/                             User-facing docs + per-feature design docs
 docs/todo.md                      Backlog (shipped + open)
 dist/                             Built bundle — DO NOT hand-edit; CI rebuilds on every push
 .dev/                             Local dev artefacts: HA config, throwaway scripts, draft comments
-.github/workflows/                build.yml, release.yml, hacs-action.yml, sync-master.yml
+.github/workflows/                build.yml, release.yml, hacs-action.yml
 rollup.config.js                  Production bundle config
 rollup.config.dev.js              Dev server config (`npm start` on :5000)
 docker-compose.yml                Local HA testbed (`npm run ha:up`)

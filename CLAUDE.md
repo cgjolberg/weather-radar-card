@@ -25,6 +25,6 @@ Claude-specific supplement, not override.
   `leaflet.markercluster` init race ([#110](https://github.com/jpettitt/weather-radar-card/issues/110))
   is the canonical example. Treat it as a hard constraint, not
   advisory.
-- `master` is the canonical working branch; `main` is mirrored by
-  CI. If a memory entry from before the workflow flip says
-  otherwise, update it.
+- `main` is the canonical and only long-lived branch. The repo had a
+  `master` branch up to mid-2026 from its pre-transfer history; it
+  has been removed. If a memory entry says otherwise, update it.
