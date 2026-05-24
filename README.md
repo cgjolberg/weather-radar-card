@@ -88,6 +88,16 @@ resources:
     type: module
 ```
 
+## Local Deployment
+
+Deploy a development bundle from this repo root with:
+
+```powershell
+.\deploy.cmd
+```
+
+Set the local Home Assistant destination in `scripts/deploy-ha-dev.local.ps1`. That file is ignored by git so deployment host and path details remain local.
+
 ## Minimal config
 
 ```yaml

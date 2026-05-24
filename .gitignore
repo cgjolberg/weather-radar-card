@@ -29,6 +29,7 @@ Thumbs.db
 *.local
 .env.local
 .env.*.local
+scripts/deploy-ha-dev.local.ps1
 
 # Local HA testbed runtime state (docker-compose mount target). Only
 # .dev/configuration.yaml.example is tracked; everything HA writes lives
