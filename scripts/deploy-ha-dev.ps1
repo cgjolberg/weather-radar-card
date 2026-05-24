@@ -9,6 +9,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function ConvertTo-ShellSingleQuoted {
+  param([string]$Value)
+  return "'" + ($Value -replace "'", "'\''") + "'"
+}
+
 $repoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
 $localConfigPath = Join-Path $PSScriptRoot "deploy-ha-dev.local.ps1"
 
@@ -32,6 +37,13 @@ if (-not $RemotePath) {
   throw "Missing deploy path. Pass -RemotePath or set `$DeployRemotePath in scripts\deploy-ha-dev.local.ps1."
 }
 
+$remoteDirectoryEnd = $RemotePath.LastIndexOf("/")
+if ($remoteDirectoryEnd -le 0) {
+  throw "RemotePath must include an absolute destination directory and filename."
+}
+
+$remoteDirectory = $RemotePath.Substring(0, $remoteDirectoryEnd)
+$quotedRemoteDirectory = ConvertTo-ShellSingleQuoted $remoteDirectory
 $localFilePath = Join-Path $repoRoot $LocalFile
 
 Push-Location $repoRoot
@@ -39,12 +51,21 @@ try {
   if (-not $SkipBuild) {
     if ($FullBuild) {
       Write-Host "Building with npm run build..."
-      npm run build
+      & npm.cmd run build
+      if ($LASTEXITCODE -ne 0) {
+        throw "npm run build failed with exit code $LASTEXITCODE"
+      }
     } else {
       Write-Host "Linting..."
-      npm run lint
+      & npm.cmd run lint
+      if ($LASTEXITCODE -ne 0) {
+        throw "npm run lint failed with exit code $LASTEXITCODE"
+      }
       Write-Host "Building with npm run rollup..."
-      npm run rollup
+      & npm.cmd run rollup
+      if ($LASTEXITCODE -ne 0) {
+        throw "npm run rollup failed with exit code $LASTEXITCODE"
+      }
     }
   }
 
@@ -56,11 +77,17 @@ try {
   Write-Host "Deploying $LocalFile to $target"
 
   if ($DryRun) {
-    Write-Host "Dry run only. Skipping scp."
+    Write-Host "Dry run only. Would ensure the remote destination directory exists, then copy the built file."
     exit 0
   }
 
-  scp $localFilePath $target
+  Write-Host "Ensuring remote destination directory exists..."
+  & ssh $Remote "mkdir -p $quotedRemoteDirectory"
+  if ($LASTEXITCODE -ne 0) {
+    throw "Remote directory creation failed with exit code $LASTEXITCODE"
+  }
+
+  & scp $localFilePath $target
   if ($LASTEXITCODE -ne 0) {
     throw "scp failed with exit code $LASTEXITCODE"
   }

@@ -97,6 +97,7 @@ Deploy a development bundle from this repo root with:
 ```
 
 Set the local Home Assistant destination in `scripts/deploy-ha-dev.local.ps1`. That file is ignored by git so deployment host and path details remain local.
+The deploy command creates the configured remote destination directory on its first run when needed.
 
 ## Minimal config
 
@@ -105,6 +106,13 @@ type: 'custom:weather-radar-card'
 ```
 
 That's it. The card defaults to RainViewer, your HA instance's location, and a `zone.home` marker. From there, the GUI editor exposes every knob — see [Configuration](https://github.com/jpettitt/weather-radar-card/blob/main/docs/configuration.md) for the full reference and [Examples](https://github.com/jpettitt/weather-radar-card/blob/main/docs/examples.md) for common starting points.
+
+For touchscreen dashboards, YAML can enlarge the timeline scrub target while preserving its slim visual track:
+
+```yaml
+show_progress_bar: true
+progress_bar_touch_height: 44
+```
 
 ## Changelog
 
