@@ -60,7 +60,7 @@ zoom_level: 7
 
 ## Tablet-friendly timeline scrubbing
 
-Increase the touch target around the timeline while keeping the visible progress track slim.
+Increase the touch target upward over the lower map area while keeping the visible progress track slim and the bottom bar at its original height.
 
 ```yaml
 type: 'custom:weather-radar-card'

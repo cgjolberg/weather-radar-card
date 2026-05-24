@@ -107,7 +107,7 @@ type: 'custom:weather-radar-card'
 
 That's it. The card defaults to RainViewer, your HA instance's location, and a `zone.home` marker. From there, the GUI editor exposes every knob — see [Configuration](https://github.com/jpettitt/weather-radar-card/blob/main/docs/configuration.md) for the full reference and [Examples](https://github.com/jpettitt/weather-radar-card/blob/main/docs/examples.md) for common starting points.
 
-For touchscreen dashboards, YAML can enlarge the timeline scrub target while preserving its slim visual track:
+For touchscreen dashboards, YAML can enlarge the timeline scrub target upward over the lower map while preserving its slim visual track and original bottom-bar height:
 
 ```yaml
 show_progress_bar: true

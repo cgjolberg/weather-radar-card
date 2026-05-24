@@ -433,8 +433,10 @@ export class WeatherRadarCard extends LitElement implements LovelaceCard {
           </div>
         </div>
         <div id="mapid"></div>
-        <div id="div-progress-bar" style="height:${progressBarTouchHeight}px;cursor:pointer;display:${this._config.show_progress_bar === false ? 'none' : 'flex'}">
-          <div id="div-progress-track" style="height:${PROGRESS_BAR_TRACK_HEIGHT}px"></div>
+        <div id="div-progress-bar" style="height:${PROGRESS_BAR_TRACK_HEIGHT}px;display:${this._config.show_progress_bar === false ? 'none' : 'block'}">
+          <div id="div-progress-touch-target" style="height:${progressBarTouchHeight}px">
+            <div id="div-progress-track" style="height:${PROGRESS_BAR_TRACK_HEIGHT}px"></div>
+          </div>
         </div>
         <div id="bottom-container">
           <div id="timestampid">
@@ -1001,28 +1003,28 @@ export class WeatherRadarCard extends LitElement implements LovelaceCard {
   // ── Navigation pause ──────────────────────────────────────────────────────
 
   private _setupProgressBarScrub(): void {
-    const bar = this.shadowRoot?.getElementById('div-progress-bar');
-    if (!bar) return;
+    const touchTarget = this.shadowRoot?.getElementById('div-progress-touch-target');
+    if (!touchTarget) return;
     let active = false;
 
     const seek = (e: PointerEvent): void => {
       if (!this._player || this._player.frameCount === 0) return;
-      const rect = bar.getBoundingClientRect();
+      const rect = touchTarget.getBoundingClientRect();
       this._player.scrubTo(progressBarFrameIndex(e.clientX, rect.left, rect.width, this._player.frameCount));
     };
 
-    bar.addEventListener('pointerdown', (e) => {
+    touchTarget.addEventListener('pointerdown', (e) => {
       active = true;
-      bar.setPointerCapture(e.pointerId);
+      touchTarget.setPointerCapture(e.pointerId);
       seek(e);
     });
-    bar.addEventListener('pointermove', (e) => { if (active) seek(e); });
-    bar.addEventListener('pointerup', () => {
+    touchTarget.addEventListener('pointermove', (e) => { if (active) seek(e); });
+    touchTarget.addEventListener('pointerup', () => {
       if (!active) return;
       active = false;
       this._player?.scrubEnd();
     });
-    bar.addEventListener('pointercancel', () => {
+    touchTarget.addEventListener('pointercancel', () => {
       active = false;
       this._player?.scrubEnd();
     });
@@ -1189,8 +1191,13 @@ export class WeatherRadarCard extends LitElement implements LovelaceCard {
       .radar-toolbar { background: white; border-radius: 4px; }
       .radar-toolbar li { list-style: none; }
       #div-progress-bar {
-        align-items: center;
+        position: relative; z-index: 1001;
         background: var(--ha-card-background, var(--card-background-color));
+      }
+      #div-progress-touch-target {
+        position: absolute; left: 0; right: 0; bottom: 0;
+        display: flex; align-items: flex-end;
+        cursor: pointer; touch-action: none;
       }
       #div-progress-track {
         display: flex; width: 100%;

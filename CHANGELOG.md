@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Tablet-friendly timeline scrubbing.** Added the YAML-only `progress_bar_touch_height` option to enlarge the tappable and draggable progress-bar region while keeping the visible segmented track at its existing 8 px height.
+- **Tablet-friendly timeline scrubbing.** Added the YAML-only `progress_bar_touch_height` option to enlarge the tappable and draggable progress-bar region upward over the lower map, while keeping the visible segmented track at its existing 8 px height and leaving the bottom chrome unchanged.
 
 ## [3.6.3] - 2026-05-23
 
