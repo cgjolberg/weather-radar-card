@@ -13,12 +13,18 @@ Claude-specific supplement, not override.
   memory entry conflicts with [`AGENTS.md`](AGENTS.md),
   [`AGENTS.md`](AGENTS.md) wins and the memory entry should be
   updated.
-- The user's global instructions (their personal `~/.claude/CLAUDE.md`)
-  may impose additional rules — most commonly around when not to
-  push or commit without explicit approval. Respect those on top of
-  the project rules. The rule "Always allow the user to test code
-  before pushing it" survives any session-level commit-autonomy
-  grant.
+- **Push/deploy autonomy (workspace policy, 2026-06-20).** In this workspace
+  the user has granted Claude **durable** autonomy to commit, push to
+  `origin` (the cgjolberg fork), and deploy to HA to complete a task —
+  **no per-action approval**; review happens via git history. See the root
+  [`../CLAUDE.md`](../CLAUDE.md) and [`OVERVIEW.md`](OVERVIEW.md) for the
+  full policy and the deploy/push mechanics. This is a deliberate standing
+  decision, not a session-level grant. Two carve-outs still hold: the
+  **diagnostic discipline** below (no fixes without understanding), and
+  **`upstream` (jpettitt) PRs**, which remain a deliberate, explicitly
+  requested action — autonomy covers `origin` + HA deploy, not contributing
+  upstream. No history rewriting (rebase/reset --hard/force-push) without an
+  explicit instruction.
 - The **diagnostic discipline** in [`AGENTS.md`](AGENTS.md) ("no
   fixes without understanding") is load-bearing. It exists because
   the rule was learned from real incidents in this codebase — the
@@ -28,3 +34,11 @@ Claude-specific supplement, not override.
 - `main` is the canonical and only long-lived branch. The repo had a
   `master` branch up to mid-2026 from its pre-transfer history; it
   has been removed. If a memory entry says otherwise, update it.
+- **Keep docs current without being asked.** When a change affects the
+  build, deploy, push/credentials, or branch story, update
+  [`OVERVIEW.md`](OVERVIEW.md) (bump its `> Snapshot:` date) in the **same
+  commit** — and if the deploy/push story changed, also the
+  `card-deploy-setup` memory and
+  [`../WORKSPACE-OVERVIEW.md`](../WORKSPACE-OVERVIEW.md). See *Keeping this
+  file current* in [`OVERVIEW.md`](OVERVIEW.md). Project/code rules stay in
+  [`AGENTS.md`](AGENTS.md); workspace deploy specifics stay in `OVERVIEW.md`.
