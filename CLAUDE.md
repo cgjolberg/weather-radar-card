@@ -34,6 +34,14 @@ Claude-specific supplement, not override.
 - `main` is the canonical and only long-lived branch. The repo had a
   `master` branch up to mid-2026 from its pre-transfer history; it
   has been removed. If a memory entry says otherwise, update it.
+- **Working plan: read [`PLAN.md`](PLAN.md) first, keep it updated.** It's the
+  persistent record of what we're doing in *this* repo — current focus, next
+  steps, open questions, decisions, and a dated log. Read it at the start of any
+  work here (the workspace `SessionStart` hook also auto-prints its *Current
+  focus* + *Next steps*), and update it in the **same commit** as the work so we
+  don't lose track when bouncing between projects. PLAN.md is a workspace-local
+  working file — keep it out of `upstream`-facing concerns; it's not part of
+  [`AGENTS.md`](AGENTS.md)'s fork-facing code rules.
 - **Keep docs current without being asked.** When a change affects the
   build, deploy, push/credentials, or branch story, update
   [`OVERVIEW.md`](OVERVIEW.md) (bump its `> Snapshot:` date) in the **same
