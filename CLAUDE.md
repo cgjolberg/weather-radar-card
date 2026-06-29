@@ -25,6 +25,13 @@ Claude-specific supplement, not override.
   requested action — autonomy covers `origin` + HA deploy, not contributing
   upstream. No history rewriting (rebase/reset --hard/force-push) without an
   explicit instruction.
+- **Run deploy/push prompt-free (allowlisted in [`../.claude/settings.json`](../.claude/settings.json),
+  2026-06-28).** Invoke as **standalone, forward-slash, `cd`-free** commands — in-repo
+  `git push origin main` then `./deploy.cmd`, or from the workspace root
+  `git -C ./weather-radar-card push origin main` then `./weather-radar-card/deploy.cmd`. A
+  `cd`-prefixed, back-slashed (`.\deploy.cmd`), or piped/chained form won't match the allowlist
+  and will prompt. Force-push and **`upstream` (jpettitt) pushes** are deliberately left to prompt.
+  (Allowlist/deploy specifics belong here in `CLAUDE.md`/`OVERVIEW.md`, not in fork-facing `AGENTS.md`.)
 - The **diagnostic discipline** in [`AGENTS.md`](AGENTS.md) ("no
   fixes without understanding") is load-bearing. It exists because
   the rule was learned from real incidents in this codebase — the
