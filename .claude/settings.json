@@ -9,6 +9,13 @@
       "mcp__home-assistant__ha_get_hacs_info",
       "mcp__home-assistant__ha_get_automation_traces",
       "mcp__home-assistant__ha_config_get_calendar_events",
+      "mcp__home-assistant__ha_config_list_dashboard_resources",
+      "mcp__home-assistant__ha_get_device",
+      "mcp__home-assistant__ha_get_history",
+      "mcp__home-assistant__ha_list_services",
+      "mcp__Claude_in_Chrome__list_connected_browsers",
+      "mcp__Claude_in_Chrome__get_page_text",
+      "mcp__Claude_in_Chrome__read_page",
       "PowerShell(./deploy.cmd*)",
       "PowerShell(git push origin main)"
     ]

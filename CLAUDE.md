@@ -32,6 +32,13 @@ Claude-specific supplement, not override.
   `cd`-prefixed, back-slashed (`.\deploy.cmd`), or piped/chained form won't match the allowlist
   and will prompt. Force-push and **`upstream` (jpettitt) pushes** are deliberately left to prompt.
   (Allowlist/deploy specifics belong here in `CLAUDE.md`/`OVERVIEW.md`, not in fork-facing `AGENTS.md`.)
+- **Allowlist scoping.** Scoped into this repo (the `cd`-into-it workflow), the live permissions are
+  **this repo's own** [`.claude/settings.json`](.claude/settings.json) + your user settings — **not**
+  the parent's. So the deploy/push entries above live here too, alongside the workspace's shared
+  **read-only MCP allowlist** (HA `ha_*` reads + Chrome reads) — kept **in sync across all repos + the
+  root** and **never** moved to user/global `~/.claude/settings.json` (auto-approval is scoped to this
+  tree on purpose). Full logic: root [`../CLAUDE.md`](../CLAUDE.md) → *Permission allowlists*. (This is
+  a workspace/deploy specific — it stays here, not in the fork-facing `AGENTS.md`.)
 - The **diagnostic discipline** in [`AGENTS.md`](AGENTS.md) ("no
   fixes without understanding") is load-bearing. It exists because
   the rule was learned from real incidents in this codebase — the
