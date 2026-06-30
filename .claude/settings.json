@@ -19,6 +19,9 @@
       "PowerShell(./deploy.cmd*)",
       "PowerShell(./deploy.cmd *)",
       "PowerShell(git push origin main)"
+    ],
+    "deny": [
+      "Bash"
     ]
   }
 }

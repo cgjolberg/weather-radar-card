@@ -39,6 +39,9 @@ Claude-specific supplement, not override.
   root** and **never** moved to user/global `~/.claude/settings.json` (auto-approval is scoped to this
   tree on purpose). Full logic: root [`../CLAUDE.md`](../CLAUDE.md) → *Permission allowlists*. (This is
   a workspace/deploy specific — it stays here, not in the fork-facing `AGENTS.md`.)
+- **Shell: use the PowerShell tool only.** The Bash tool is disabled in this repo's
+  `.claude/settings.json` (`deny: ["Bash"]`) — run every command via PowerShell. (Workspace
+  specific; stays here, not in `AGENTS.md`.)
 - The **diagnostic discipline** in [`AGENTS.md`](AGENTS.md) ("no
   fixes without understanding") is load-bearing. It exists because
   the rule was learned from real incidents in this codebase — the
