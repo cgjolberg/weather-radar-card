@@ -18,10 +18,9 @@
       "mcp__Claude_in_Chrome__read_page",
       "PowerShell(./deploy.cmd*)",
       "PowerShell(./deploy.cmd *)",
-      "PowerShell(git push origin main)"
-    ],
-    "deny": [
-      "Bash"
+      "PowerShell(git push origin main)",
+      "Bash(./deploy.cmd*)",
+      "Bash(./deploy.cmd *)"
     ]
   }
 }
