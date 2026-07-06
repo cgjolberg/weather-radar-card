@@ -18,6 +18,9 @@
       "mcp__Claude_in_Chrome__list_connected_browsers",
       "mcp__Claude_in_Chrome__get_page_text",
       "mcp__Claude_in_Chrome__read_page",
+      "mcp__claude-in-chrome__list_connected_browsers",
+      "mcp__claude-in-chrome__get_page_text",
+      "mcp__claude-in-chrome__read_page",
       "PowerShell(./deploy.cmd*)",
       "PowerShell(./deploy.cmd *)",
       "PowerShell(git add *)",
@@ -34,6 +37,20 @@
       "Bash(git status *)",
       "PowerShell(git diff *)",
       "Bash(git diff *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "pwsh -NoProfile -ExecutionPolicy Bypass -File \"C:\\Users\\Casey Gjolberg\\Documents\\Claude\\Proxmox\\HomeAssistant\\.claude\\permission-hook.ps1\"",
+            "timeout": 30
+          }
+        ]
+      }
     ]
   }
 }

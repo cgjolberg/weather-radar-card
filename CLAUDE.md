@@ -43,6 +43,14 @@ Claude-specific supplement, not override.
   allowlisted under **both** `Bash(...)` and `PowerShell(...)` in this repo's `.claude/settings.json`
   (so they run prompt-free whichever facade Claude picks), but PowerShell stays the default. (Workspace
   specific; stays here, not in `AGENTS.md`.)
+- **2026-07-05:** a Claude Code **2.1.197 regression** currently ignores these `Bash(...)`/
+  `PowerShell(...)` allowlist entries in desktop sessions — expect prompts despite correct form.
+  Entries + form rules stay; until fixed, minimize shell calls (wrappers like `./deploy.cmd`; from a
+  workspace-root session, `./commit-push.cmd "<msg>"` covers commit+push). Status + verify-fixed
+  checklist: [`../.claude/PERMISSIONS.md`](../.claude/PERMISSIONS.md).
+- **2026-07-06:** mitigated by the workspace **PreToolUse permission hook** (Layer 0,
+  `../.claude/permission-hook.ps1`) — auto-allows these commands under either shell tool; the
+  declarative entries are kept as fallback. See [`../.claude/PERMISSIONS.md`](../.claude/PERMISSIONS.md).
 - The **diagnostic discipline** in [`AGENTS.md`](AGENTS.md) ("no
   fixes without understanding") is load-bearing. It exists because
   the rule was learned from real incidents in this codebase — the
