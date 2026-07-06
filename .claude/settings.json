@@ -13,6 +13,8 @@
       "mcp__home-assistant__ha_get_device",
       "mcp__home-assistant__ha_get_history",
       "mcp__home-assistant__ha_list_services",
+      "mcp__home-assistant__ha_list_floors_areas",
+      "mcp__home-assistant__ha_eval_template",
       "mcp__Claude_in_Chrome__list_connected_browsers",
       "mcp__Claude_in_Chrome__get_page_text",
       "mcp__Claude_in_Chrome__read_page",
