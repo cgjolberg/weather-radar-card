@@ -1,12 +1,12 @@
 # weather-radar-card — Repo Overview
 
-> Snapshot: 2026-06-20. Part of the Home Assistant **file/code lane** workspace.
+> Snapshot: 2026-07-07. Part of the Home Assistant **file/code lane** workspace.
 > The root [`../CLAUDE.md`](../CLAUDE.md) is the authority on workspace-wide rules
-> (incl. the **push/deploy autonomy policy**). This repo also has its own deep agent
-> docs in [`AGENTS.md`](AGENTS.md) and [`CLAUDE.md`](CLAUDE.md) — **read those first**
-> for repo-specific rules (diagnostic discipline, branch policy). This file is the
-> workspace-local overview (deploy/push facts live here, **not** in `AGENTS.md`, which is
-> fork/upstream-facing). **Keep it current** — see *Keeping this file current* at the bottom.
+> (incl. the **push/deploy autonomy policy**). This repo's own agent rules —
+> diagnostic discipline, branch policy, pre-commit gates — live in
+> [`CLAUDE.md`](CLAUDE.md), now the **single canonical rules file** (**read it first**).
+> This file is the workspace-local overview of deploy/push facts. **Keep it current**
+> — see *Keeping this file current* at the bottom.
 
 ## Purpose
 A Lovelace **custom card** (`custom:weather-radar-card`) showing animated rain-radar
@@ -32,7 +32,7 @@ The built bundle `dist/weather-radar-card.js` is a **build output and is gitigno
 
 ## Deploy (dev channel)
 ```powershell
-.\deploy.cmd            # wrapper -> deploy.ps1 -> scripts\deploy-ha-dev.ps1
+./deploy.cmd            # wrapper -> deploy.ps1 -> scripts\deploy-ha-dev.ps1
 ```
 - **The deploy scripts live on `main`** (`deploy.cmd`, `deploy.ps1`,
   `scripts/deploy-ha-dev.ps1`) — they are *not* present on feature branches.
@@ -52,13 +52,10 @@ The built bundle `dist/weather-radar-card.js` is a **build output and is gitigno
   setup, incl. the `.local.ps1` values, is in the `card-deploy-setup` memory, not in this repo.)
 
 ## Push (GitHub)
-`git push` to `origin` (cgjolberg fork) is **non-interactive** — HTTPS auth is cached in Git
-Credential Manager — so Claude can commit and push without a manual auth prompt. Per the root
-autonomy policy, Claude commits with a reviewed diff, then pushes to `origin` / deploys to HA
-to complete a task (no separate approval); review via git history. **`upstream` (jpettitt) is
-different:** contributing a PR upstream is a deliberate, explicitly-requested action — not
-something to do autonomously — and don't diverge tracked files (e.g. `.gitattributes`) from
-upstream just for local convenience.
+`origin` → `github.com/cgjolberg/weather-radar-card` (fork), branch `main`; push/deploy is
+autonomous per the root policy (root [`../CLAUDE.md`](../CLAUDE.md) → *Deployment*). **`upstream`
+(jpettitt) is different** — a PR there is explicit-request-only, and don't diverge tracked files
+(e.g. `.gitattributes`) from upstream just for local convenience.
 
 ## Git
 - `origin` → `github.com/cgjolberg/weather-radar-card`;
@@ -66,10 +63,8 @@ upstream just for local convenience.
 - **Forgejo:** this workspace repo pushes to **GitHub only** — by design. Forgejo
   backs up the **HA server's own config** (a separate lane, reachable via the
   home-assistant MCP), not these card repos. See [`../WORKSPACE-OVERVIEW.md`](../WORKSPACE-OVERVIEW.md).
-- As of 2026-06-19: on **`main`**, in sync with `origin/main`. (The
-  `feature/progress-bar-touch-height` branch — the touch-target work behind the root
-  `../Progress bar touch demo.mp4` — was being PR'd back to `upstream`; switched to `main`
-  for the deploy path.) Per `CLAUDE.md`, `main` is the only long-lived branch.
+- On **`main`**, in sync with `origin/main` — per [`CLAUDE.md`](CLAUDE.md), the only
+  long-lived branch.
 
 ## Repo-specific notes
 - **Line endings — fork-safe handling.** `.gitattributes` here only marks
@@ -78,7 +73,7 @@ upstream just for local convenience.
   unchanged (avoid diverging upstream), and the deploy artifact is JS anyway. For local LF
   consistency, `core.autocrlf` is set to **false** in this clone (2026-06-19) instead of
   committing an `eol` change.
-- The repo's own `AGENTS.md` diagnostic discipline ("no fixes without understanding")
+- The [`CLAUDE.md`](CLAUDE.md) diagnostic discipline ("no fixes without understanding")
   is a hard constraint — honor it.
 
 ## Keeping this file current
@@ -86,8 +81,8 @@ Treat docs as part of every change here — update them in the **same commit**, 
 "if I remember" follow-up. Before committing, check these still read true and fix the ones
 that don't (derive dates/status from `git`, never invent them):
 - This `OVERVIEW.md` — build, **deploy/push mechanism + target**, switches, branch state,
-  and the `> Snapshot:` line (bump to today when you touch the repo). Keep workspace deploy
-  specifics **here**, not in the fork/upstream-facing `AGENTS.md`.
+  and the `> Snapshot:` line (bump to today when you touch the repo). Repo agent/code rules
+  live in [`CLAUDE.md`](CLAUDE.md); keep deploy specifics here.
 - **When the deploy/push story changes** (the SSH key, the auto-bump, credential auth,
   resource ID, or the `.local.ps1` target), update the Deploy/Push sections here **and** the
   `card-deploy-setup` memory **and** [`../WORKSPACE-OVERVIEW.md`](../WORKSPACE-OVERVIEW.md).
