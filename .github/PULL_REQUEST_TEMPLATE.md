@@ -1,5 +1,5 @@
 <!--
-PR template — see AGENTS.md for the full contribution guide.
+PR template — see CLAUDE.md for the full contribution guide.
 
 Do not remove sections. Mark sections "n/a" with a one-line reason
 when they truly don't apply (e.g. "n/a — docs-only"). Reviewers use
