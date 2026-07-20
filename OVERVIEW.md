@@ -1,6 +1,6 @@
 # weather-radar-card — Repo Overview
 
-> Snapshot: 2026-07-07. Part of the Home Assistant **file/code lane** workspace.
+> Snapshot: 2026-07-19. Part of the Home Assistant **file/code lane** workspace.
 > The root [`../CLAUDE.md`](../CLAUDE.md) is the authority on workspace-wide rules
 > (incl. the **push/deploy autonomy policy**). This repo's own agent rules —
 > diagnostic discipline, branch policy, pre-commit gates — live in
@@ -72,7 +72,10 @@ autonomous per the root policy (root [`../CLAUDE.md`](../CLAUDE.md) → *Deploym
   a **fork that PRs back to `upstream`**, its tracked `.gitattributes` is deliberately left
   unchanged (avoid diverging upstream), and the deploy artifact is JS anyway. For local LF
   consistency, `core.autocrlf` is set to **false** in this clone (2026-06-19) instead of
-  committing an `eol` change.
+  committing an `eol` change. The **worktree was renormalized to LF 2026-07-19** (`read-tree
+  HEAD` to drop the stat cache, then a forced `checkout-index` rewrite from the LF index) —
+  the old CRLF/mixed working tree from the pre-2026-06-19 `autocrlf=true` era is gone, so
+  edits no longer risk committing CRLF or showing whole-file phantom diffs.
 - The [`CLAUDE.md`](CLAUDE.md) diagnostic discipline ("no fixes without understanding")
   is a hard constraint — honor it.
 
